@@ -4,6 +4,11 @@ import os
 import sys
 import subprocess
 import ctypes
+import re
+try:
+    import winreg
+except ImportError:  # pragma: no cover - only relevant on non-Windows tooling
+    winreg = None
 from html import escape
 from collections import Counter
 from copy import deepcopy
@@ -15,11 +20,12 @@ from PyQt5.QtGui import QColor, QDesktopServices, QFont, QIcon, QLinearGradient,
 from PyQt5.QtWidgets import (
     QAction, QApplication, QComboBox, QDialog, QFileDialog, QFrame, QGridLayout,
     QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMainWindow, QMenu, QMessageBox,
-    QProgressBar, QPushButton, QScrollArea, QSizePolicy, QSplitter, QStyle,
+    QAbstractItemView, QProgressBar, QPushButton, QScrollArea, QSizePolicy, QSplitter, QStyle,
     QStyledItemDelegate, QStyleOptionViewItem, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget, QWidgetAction,
 )
 
 from .categories import CATEGORIES, SIMPLE_CATEGORIES, infer_categories, simple_categories
+from .collection_sync import restore_collection_files, sync_collection_files
 from .models import Mod, ModCollection
 from .steam_client import SteamClient
 from .storage import AppStorage
@@ -28,6 +34,7 @@ from .vpk_scanner import is_conflict_relevant_path, scan_mod_directory
 APP_ROOT = Path(__file__).resolve().parent.parent
 BACKGROUND_IMAGE = APP_ROOT / "files" / "bg.png"
 TITLE_IMAGE = APP_ROOT / "files" / "title.png"
+TITLE_ICON = APP_ROOT / "files" / "title.ico"
 # Runtime data is kept outside the bundled application so it remains writable
 # and survives Nuitka onefile extraction.
 USER_DATA_ROOT = Path(
@@ -196,11 +203,8 @@ class ModCard(QFrame):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(ui(10), ui(8), ui(10), ui(8))
         layout.setSpacing(ui(4))
-        preview = QLabel()
+        preview = HoverPreview(mod, card_width - ui(20), ui(76), self)
         preview.setObjectName("preview")
-        preview.setAlignment(Qt.AlignCenter)
-        preview.setFixedHeight(ui(76))
-        preview.setPixmap(make_preview_pixmap(mod, card_width - ui(20), ui(76)))
         layout.addWidget(preview)
 
         title = TwoLineElidedLabel(mod.title or mod.file_name)
@@ -244,6 +248,7 @@ class ModCard(QFrame):
         tags.addStretch(1)
         layout.addLayout(tags)
 
+        layout.addStretch(1)
         action_row = QHBoxLayout()
         action_row.setSpacing(ui(6))
         button = QPushButton("禁用 Mod" if mod.active else "启用 Mod")
@@ -253,6 +258,7 @@ class ModCard(QFrame):
         button.clicked.connect(lambda: self.clicked.emit(self.mod.id))
         action_row.addWidget(button, 1)
         layout.addLayout(action_row)
+
 
     def _add_source_tag(self, layout: QHBoxLayout) -> None:
         if self.mod.steam_loaded and self.mod.workshop_id:
@@ -301,6 +307,33 @@ class ModCard(QFrame):
     def contextMenuEvent(self, event) -> None:
         self.context_requested.emit(self.mod.id, event.globalPos())
         event.accept()
+
+
+class HoverPreview(QLabel):
+    def __init__(self, mod: Mod, width: int, height: int, parent=None):
+        super().__init__(parent)
+        self.mod = mod
+        self.base_width = width
+        self.base_height = height
+        self.setAlignment(Qt.AlignCenter)
+        self.setFixedHeight(height)
+        self.setPixmap(make_preview_pixmap(mod, width, height))
+
+    def enterEvent(self, event) -> None:
+        normal = self.geometry()
+        expanded = normal.adjusted(-ui(18), -ui(12), ui(18), ui(28))
+        self.setGeometry(expanded)
+        self.raise_()
+        self.setPixmap(make_preview_pixmap(self.mod, expanded.width(), expanded.height()))
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:
+        normal_width = self.base_width
+        normal_height = self.base_height
+        current = self.geometry()
+        self.setGeometry(current.center().x() - normal_width // 2, current.center().y() - normal_height // 2, normal_width, normal_height)
+        self.setPixmap(make_preview_pixmap(self.mod, normal_width, normal_height))
+        super().leaveEvent(event)
 
 
 class LegacyConflictDialog(QDialog):
@@ -512,8 +545,20 @@ class ConflictDialog(QDialog):
                     if peer in remaining:
                         remaining.remove(peer)
                         pending.append(peer)
-            groups.append(sorted((mods[mod_id] for mod_id in component), key=lambda mod: mod.title.lower()))
-        return sorted(groups, key=lambda group: group[0].title.lower())
+            groups.append(
+                sorted(
+                    (mods[mod_id] for mod_id in component),
+                    key=lambda mod: (-len(mod.conflict_with), mod.title.casefold()),
+                )
+            )
+        return sorted(
+            groups,
+            key=lambda group: (
+                -sum(len(mod.conflict_with) for mod in group),
+                -len(group),
+                group[0].title.casefold(),
+            ),
+        )
 
     @staticmethod
     def _group_label(index: int, group: list[Mod]) -> str:
@@ -930,10 +975,16 @@ class CollectionItemDelegate(QStyledItemDelegate):
     def paint(self, painter, option, index):
         option = QStyleOptionViewItem(option)
         delete_rect = option.rect.adjusted(option.rect.width() - self.delete_width, 0, 0, 0)
+        # This is a multi-check popup, not a single-selection list.  Remove
+        # the default blue hover/selection state while keeping each item's
+        # checkbox state visible.
+        option.state &= ~QStyle.State_MouseOver
+        option.state &= ~QStyle.State_Selected
         super().paint(painter, option, index)
         painter.save()
-        background = option.palette.highlight().color() if option.state & QStyle.State_Selected else option.palette.base().color()
-        painter.fillRect(delete_rect, background)
+        # The delete affordance is painted after the default delegate, so
+        # restore the normal popup background in its area as well.
+        painter.fillRect(delete_rect, option.palette.base().color())
         painter.setPen(QColor("#687384" if index.data(Qt.UserRole) == "default" else "#f1c2c7"))
         painter.drawText(delete_rect, Qt.AlignCenter, "×")
         painter.restore()
@@ -953,6 +1004,8 @@ class MultiSelectComboBox(QComboBox):
         self.setCursor(Qt.PointingHandCursor)
         self.setItemDelegate(CollectionItemDelegate(self))
         self._popup_open = False
+        self._keep_popup_open = False
+        self.view().setSelectionMode(QAbstractItemView.NoSelection)
         self.lineEdit().installEventFilter(self)
         self.view().viewport().installEventFilter(self)
 
@@ -983,6 +1036,11 @@ class MultiSelectComboBox(QComboBox):
         super().showPopup()
 
     def hidePopup(self) -> None:
+        # QComboBox may request closing immediately after a popup item is
+        # clicked.  A checkable item is not a final selection, so keep the
+        # popup open until the user clicks outside it or toggles the combo.
+        if self._keep_popup_open:
+            return
         if not self.view().isVisible() and not self._popup_open:
             return
         self._popup_open = False
@@ -1011,10 +1069,22 @@ class MultiSelectComboBox(QComboBox):
                     return True
                 state = self.model().data(index, Qt.CheckStateRole)
                 next_state = Qt.Unchecked if state == Qt.Checked else Qt.Checked
+                self._keep_popup_open = True
                 self.model().setData(index, next_state, Qt.CheckStateRole)
                 self.selection_changed.emit()
                 return True
+        if source is self.view().viewport() and event.type() == QEvent.MouseButtonRelease:
+            # Consume the release too. QComboBox normally treats it as a
+            # completed single selection and closes its popup.
+            if self._keep_popup_open and event.button() == Qt.LeftButton:
+                QTimer.singleShot(0, self._release_popup_guard)
+                return True
         return super().eventFilter(source, event)
+
+    def _release_popup_guard(self) -> None:
+        self._keep_popup_open = False
+        if not self.view().isVisible() and self._popup_open:
+            self.showPopup()
 
     def checked_values(self) -> list[str]:
         return [
@@ -1070,6 +1140,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowFlags(Qt.Window | Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.setWindowIcon(QIcon(str(TITLE_ICON)))
         self.setWindowTitle("L4D2 Boss · 求生之路 2 Mod 管理器")
         self.resize(ui(1200), ui(820))
         self.setMinimumSize(ui(1020), ui(680))
@@ -1082,8 +1153,15 @@ class MainWindow(QMainWindow):
             self._simple_category_cache.clear()
             self.storage.save_mods(self.mods)
         self.collections = self.storage.load_collections()
-        self._ensure_default_collection()
-        self._selected_collection_names: set[str] = {"default"}
+        cleaned_collections = [collection for collection in self.collections if collection.name != "default"]
+        if len(cleaned_collections) != len(self.collections):
+            self.collections = cleaned_collections
+            self.storage.save_collections(self.collections)
+        saved_collection_names = self.settings.get("selected_collection_names", [])
+        known_collection_names = {collection.name for collection in self.collections}
+        self._selected_collection_names: set[str] = {
+            name for name in saved_collection_names if name in known_collection_names
+        }
         self._updating_collection_combo = False
         self._collection_apply_timer = QTimer(self)
         self._collection_apply_timer.setSingleShot(True)
@@ -1092,8 +1170,12 @@ class MainWindow(QMainWindow):
         self.page_size = 100
         self.current_page = 0
         self.category_mode = "simple"
+        self._active_only_filter = False
         self.thread_pool = QThreadPool.globalInstance()
+        self.collection_sync_pool = QThreadPool(self)
+        self.collection_sync_pool.setMaxThreadCount(1)
         self.steam_sync_in_progress = False
+        self._progress_owner: str | None = None
         self._steam_cancel_event = Event()
         self._card_widgets: dict[str, ModCard] = {}
         self._card_cache: dict[str, ModCard] = {}
@@ -1110,9 +1192,12 @@ class MainWindow(QMainWindow):
         self._active_path_owners: dict[str, set[str]] = {}
         self._build_ui()
         self._apply_style()
+        self._set_status_selection(self.total_label)
         self._rebuild_conflict_index()
         self.refresh_collection_combo()
-        self.apply_selected_collections(write_addonlist=False)
+        if self._selected_collection_names:
+            self.restore_selected_collections_in_background()
+            self.apply_selected_collections(write_addonlist=False)
         self.refresh_tree()
         self.refresh_cards()
         self.refresh_stats()
@@ -1227,9 +1312,15 @@ class MainWindow(QMainWindow):
         self._cards_loading_label = QLabel("正在加载 Mod…")
         self._cards_loading_label.setObjectName("cardsLoadingLabel")
         self._cards_loading_label.setAlignment(Qt.AlignCenter)
+        loading_panel = QFrame()
+        loading_panel.setObjectName("cardsLoadingPanel")
+        panel_layout = QVBoxLayout(loading_panel)
+        panel_layout.setContentsMargins(ui(24), ui(18), ui(24), ui(18))
+        panel_layout.setSpacing(ui(6))
+        panel_layout.addWidget(self._cards_loading_spinner)
+        panel_layout.addWidget(self._cards_loading_label)
         loading_layout.addStretch(1)
-        loading_layout.addWidget(self._cards_loading_spinner)
-        loading_layout.addWidget(self._cards_loading_label)
+        loading_layout.addWidget(loading_panel, 0, Qt.AlignHCenter)
         loading_layout.addStretch(1)
         self._cards_loading_frames = ("◐", "◓", "◑", "◒")
         self._cards_loading_frame = 0
@@ -1323,21 +1414,29 @@ class MainWindow(QMainWindow):
         brand.addWidget(sub)
         layout.addLayout(brand)
         layout.addStretch(1)
+        self.header_hint = QLabel()
+        self.header_hint.setObjectName("headerHint")
+        self.header_hint.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.header_hint.setMinimumWidth(ui(250))
+        self.header_hint.hide()
+        layout.addWidget(self.header_hint)
         self.choose_button = self._header_button(
             QStyle.SP_DirOpenIcon, "选择游戏", self.choose_directory,
-            secondary=True, icon_only=True, tooltip="选择游戏：定位 left4dead2.exe 并扫描 addons 文件夹",
+            secondary=True, tooltip="选择游戏：定位 left4dead2.exe 并扫描 addons 文件夹",
         )
         self.refresh_button = self._header_button(
             QStyle.SP_BrowserReload, "扫描 Mod", lambda: self.scan_mods(False),
-            icon_only=True, tooltip="扫描 Mod：重新扫描本地 addons 文件夹",
+            tooltip="扫描 Mod：重新扫描本地 addons 文件夹",
         )
         self.fetch_button = self._header_button(
             QStyle.SP_ArrowDown, "同步 Steam", self.fetch_steam_info,
-            icon_only=True, tooltip="同步 Steam：获取创意工坊 Mod 的名称、订阅数和标签",
+            tooltip="同步 Steam：获取创意工坊 Mod 的名称、订阅数和标签",
         )
         layout.addWidget(self.choose_button)
         layout.addWidget(self.refresh_button)
         layout.addWidget(self.fetch_button)
+        for button in (self.choose_button, self.refresh_button, self.fetch_button):
+            button.installEventFilter(self)
         self.toggle_all_button = self._header_button(QStyle.SP_DialogApplyButton, "全部启动", self.toggle_all_mods)
         layout.addWidget(self.toggle_all_button)
         close = QPushButton("×")
@@ -1355,6 +1454,21 @@ class MainWindow(QMainWindow):
 
     def show_about(self) -> None:
         AboutDialog(self).exec_()
+
+    def eventFilter(self, source, event) -> bool:
+        hints = {
+            getattr(self, "choose_button", None): "选择游戏：定位 left4dead2.exe 并扫描 addons 文件夹",
+            getattr(self, "refresh_button", None): "扫描 Mod：重新扫描本地 addons 文件夹",
+            getattr(self, "fetch_button", None): "同步 Steam：获取创意工坊 Mod 信息",
+        }
+        if source in hints and hasattr(self, "header_hint"):
+            if event.type() == QEvent.Enter:
+                self.header_hint.setText(hints[source])
+                self.header_hint.show()
+            elif event.type() == QEvent.Leave:
+                self.header_hint.clear()
+                self.header_hint.hide()
+        return super().eventFilter(source, event)
 
     def _header_button(
         self, icon, text, handler, secondary: bool = False, icon_only: bool = False, tooltip: str = "",
@@ -1457,7 +1571,8 @@ class MainWindow(QMainWindow):
         footer.setObjectName("footer")
         layout = QHBoxLayout(footer)
         layout.setContentsMargins(ui(24), ui(10), ui(24), ui(10))
-        self.total_label, self.active_label = QLabel(), QLabel()
+        self.total_label = self._make_mod_count_button("totalModCount", self.show_all_mods)
+        self.active_label = self._make_mod_count_button("activeModCount", self.show_active_mods)
         self.conflict_button = QPushButton()
         self.conflict_button.setObjectName("conflictButton")
         self.conflict_button.clicked.connect(self.show_conflicts)
@@ -1465,12 +1580,22 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.active_label)
         layout.addWidget(self.conflict_button)
         layout.addStretch(1)
-        self.save_button = QPushButton("保存当前组合")
+        self.save_button = QPushButton(self.style().standardIcon(QStyle.SP_DialogSaveButton), "保 存")
         self.save_button.setObjectName("primaryButton")
         self.save_button.clicked.connect(self.save_collection)
         layout.addWidget(self.save_button)
         layout.insertWidget(layout.indexOf(self.save_button), self.toggle_all_button)
         return footer
+
+    @staticmethod
+    def _make_mod_count_button(object_name: str, handler) -> QPushButton:
+        button = QPushButton()
+        button.setObjectName(object_name)
+        button.setFlat(True)
+        button.setFixedWidth(ui(78))
+        button.setCursor(Qt.PointingHandCursor)
+        button.clicked.connect(handler)
+        return button
 
     def _build_footer(self) -> QWidget:
         footer = QFrame()
@@ -1485,9 +1610,11 @@ class MainWindow(QMainWindow):
         status_layout = QHBoxLayout(status_host)
         status_layout.setContentsMargins(ui(24), 0, 0, 0)
         status_layout.setSpacing(ui(8))
-        self.total_label, self.active_label = QLabel(), QLabel()
+        self.total_label = self._make_mod_count_button("totalModCount", self.show_all_mods)
+        self.active_label = self._make_mod_count_button("activeModCount", self.show_active_mods)
         self.conflict_button = QPushButton()
         self.conflict_button.setObjectName("conflictButton")
+        self.conflict_button.setFixedWidth(ui(78))
         self.conflict_button.clicked.connect(self.show_conflicts)
         status_layout.addWidget(self.total_label)
         status_layout.addWidget(self.active_label)
@@ -1519,12 +1646,20 @@ class MainWindow(QMainWindow):
         action_layout.addWidget(self.steam_sync_widget)
         action_layout.addStretch(1)
         action_layout.addWidget(self.toggle_all_button)
-        self.save_button = QPushButton("保存当前组合")
+        self.toggle_all_button.setFixedWidth(ui(112))
+        self.save_button = QPushButton(self.style().standardIcon(QStyle.SP_DialogSaveButton), "保 存")
         self.save_button.setObjectName("primaryButton")
+        self.save_button.setFixedWidth(ui(112))
         self.save_button.clicked.connect(self.save_collection)
         action_layout.addWidget(self.save_button)
+        self.save_as_button = QPushButton(self.style().standardIcon(QStyle.SP_FileDialogDetailedView), "另存为")
+        self.save_as_button.setObjectName("secondaryButton")
+        self.save_as_button.setFixedWidth(ui(112))
+        self.save_as_button.clicked.connect(self.save_collection_as_new)
+        action_layout.addWidget(self.save_as_button)
         self.launch_button = QPushButton("  启动游戏")
         self.launch_button.setObjectName("launchButton")
+        self.launch_button.setFixedWidth(ui(112))
         self.launch_button.setIcon(self._launch_icon())
         self.launch_button.setIconSize(QSize(ui(20), ui(20)))
         self.launch_button.clicked.connect(self.launch_game)
@@ -1543,6 +1678,7 @@ class MainWindow(QMainWindow):
             #brandButton:hover { color: #79a5ff; }
             #brandCredit { color: #8291a8; font-size: 11px; font-weight: 700; }
             #brandSub, #contentSubtitle { color: #8090a8; font-size: 10px; font-weight: 700; letter-spacing: 1px; }
+            #headerHint { color: #a9bbd5; font-size: 11px; font-weight: 600; padding-right: 8px; }
             #headerButton, #headerButtonSecondary { background: #273347; color: #d9e4f4; border: 1px solid #38465c; border-radius: 7px; padding: 8px 13px; font-weight: 700; }
             #headerButton:hover, #headerButtonSecondary:hover { background: #33435c; color: white; }
             #headerIconButton { background: #202c40; border: 0; border-radius: 7px; padding: 0; }
@@ -1550,6 +1686,14 @@ class MainWindow(QMainWindow):
             QToolTip { color: #eaf2ff; background: #202b3b; border: 1px solid #40516a; border-radius: 5px; padding: 5px 8px; }
             #primaryButton { background: #2d65d6; color: white; border: 0; border-radius: 7px; padding: 8px 13px; font-weight: 700; }
             #primaryButton:hover { background: #3c78ee; }
+            #secondaryButton { background: #253247; color: #cfdbeb; border: 1px solid #3b4b62; border-radius: 7px; padding: 8px 13px; font-weight: 700; }
+            #secondaryButton:hover { background: #30415a; border-color: #526882; }
+            #totalModCount, #activeModCount { background: transparent; border: 0; padding: 0; font-weight: 700; }
+            #totalModCount { color: #75a7ff; }
+            #activeModCount { color: #48d89a; }
+            #totalModCount:hover, #activeModCount:hover { text-decoration: underline; }
+            #totalModCount[selected="true"] { border: 1px solid #75a7ff; border-radius: 6px; padding: 3px 6px; }
+            #activeModCount[selected="true"] { border: 1px solid #48d89a; border-radius: 6px; padding: 3px 6px; }
             #launchButton { background: #16845b; color: white; border: 0; border-radius: 7px; padding: 8px 13px; font-weight: 700; }
             #launchButton:hover { background: #20a873; }
             #launchButton:disabled { color: #8b9aab; background: #293544; }
@@ -1563,7 +1707,8 @@ class MainWindow(QMainWindow):
             QTreeWidget::item:selected { background: #2b5fca; color: white; font-weight: 700; }
             QScrollArea { border: 0; background: transparent; }
             #cardsScroll, #cardsViewport, #cardsHost { background: transparent; }
-            #cardsLoadingOverlay { background: transparent; }
+            #cardsLoadingOverlay { background: rgba(10, 15, 24, 80); }
+            #cardsLoadingPanel { background: #18212e; border: 2px solid #5486ec; border-radius: 12px; }
             #cardsLoadingSpinner { color: #78a8ff; font-size: 30px; font-weight: 700; }
             #cardsLoadingLabel { color: #c4d5ee; font-size: 13px; font-weight: 700; }
             QScrollBar:vertical { background: #10151e; width: 8px; margin: 5px 0 5px 0; border-radius: 4px; }
@@ -1585,7 +1730,7 @@ class MainWindow(QMainWindow):
             #collectionCombo:hover { background: #202b3c; border-color: #3b506e; }
             #collectionCombo::drop-down { subcontrol-origin: padding; subcontrol-position: top right; border: 0; width: 30px; }
             #collectionComboMenu { background: #18212e; color: #dfe9f8; border: 1px solid #3a4a61; border-radius: 8px; outline: 0; padding: 5px; selection-background-color: transparent; }
-            #collectionComboMenu::item { min-height: 40px; border: 1px solid transparent; border-radius: 6px; padding: 0 12px; margin: 3px 0; }
+            #collectionComboMenu::item { min-height: 25px; border: 1px solid transparent; border-radius: 6px; padding: 0 12px; margin: 1px 0; }
             #collectionComboMenu::item:hover { background: #25344a; border-color: #3a5272; color: #ffffff; }
             #collectionComboMenu::item:selected { background: #2d65d6; border-color: #4d83eb; color: #ffffff; font-weight: 700; }
             #collectionComboMenu QScrollBar:vertical { background: transparent; width: 7px; margin: 7px 3px 7px 0; }
@@ -1622,7 +1767,9 @@ class MainWindow(QMainWindow):
             #footer { background: rgba(21, 27, 38, 205); border-top: 1px solid #283242; border-bottom-left-radius: 14px; border-bottom-right-radius: 14px; }
             #footer QLabel { color: #9eacc0; padding-right: 12px; }
             #conflictButton { color: #ffabab; background: transparent; border: 0; font-weight: 700; }
+            #conflictButton:hover { text-decoration: underline; }
             #conflictButton:disabled { color: #718097; }
+            #conflictButton[selected="true"] { border: 1px solid #ff8f99; border-radius: 6px; padding: 3px 6px; }
             #closeButton { min-width: 30px; max-width: 30px; min-height: 30px; max-height: 30px; padding: 0; border: 0; color: #92a1b6; background: transparent; font-size: 18px; font-weight: 800; }
             #closeButton:hover { color: #ff7a85; background: transparent; }
             #windowControlButton { padding: 0; border: 0; color: #92a1b6; background: transparent; font-size: 16px; font-weight: 700; }
@@ -1804,6 +1951,7 @@ class MainWindow(QMainWindow):
         self.category_tree.blockSignals(True)
         self.refresh_tree()
         self.category_tree.blockSignals(False)
+        self._update_mod_filter_title()
         self.current_page = 0
         if self._content_mode == "mods":
             self.refresh_cards()
@@ -2001,7 +2149,10 @@ class MainWindow(QMainWindow):
         if not hasattr(self, "scroll"):
             return
         scrollbar = self.scroll.verticalScrollBar()
-        inset = scrollbar.width() if scrollbar.isVisible() else 0
+        # Reserve the scrollbar width even before it is visible.  This keeps
+        # the toolbar, pagination and footer actions from jumping right when
+        # the first page becomes tall enough to show the bar.
+        inset = scrollbar.width() or scrollbar.sizeHint().width()
         self.content_bar.layout().setContentsMargins(0, 0, inset, 0)
         self.pagination_bar.layout().setContentsMargins(0, 0, inset, 0)
         if hasattr(self, "action_host"):
@@ -2030,6 +2181,9 @@ class MainWindow(QMainWindow):
         source_action.triggered.connect(lambda: self.open_mod_source(mod))
         details_action = menu.addAction("查看详细信息")
         details_action.triggered.connect(lambda: self.show_mod_details(mod))
+        steam_action = menu.addAction("同步当前 Mod Steam 信息")
+        steam_action.setEnabled(bool(mod.workshop_id) and not self.steam_sync_in_progress)
+        steam_action.triggered.connect(lambda: self.sync_single_mod_steam(mod_id))
         delete_action = menu.addAction("删除 Mod")
         delete_action.setToolTip("删除该 Mod 文件及其关联预览图片")
         delete_action.triggered.connect(lambda: self.delete_mod(mod_id))
@@ -2092,6 +2246,7 @@ class MainWindow(QMainWindow):
         for collection in self.collections:
             if mod_id in collection.mod_ids:
                 collection.mod_ids.remove(mod_id)
+                self.sync_collection_in_background(collection)
         self.steam_cache.pop(mod.workshop_id or "", None)
         self.storage.save_mods(self.mods)
         self.storage.save_collections(self.collections)
@@ -2177,6 +2332,7 @@ class MainWindow(QMainWindow):
         snapshot = getattr(self, "_list_snapshot", None)
         saved_cards = getattr(self, "_saved_card_widgets", [])
         self._content_mode = "mods"
+        self._set_status_selection(self.active_label if self._active_only_filter else self.total_label)
         if snapshot:
             title, subtitle, self.current_category, self.current_page = snapshot
             self.content_title.setText(title)
@@ -2215,10 +2371,25 @@ class MainWindow(QMainWindow):
                 if mod_id not in collection.mod_ids:
                     collection.mod_ids.append(mod_id)
                 self.storage.save_collections(self.collections)
+                self.sync_collection_in_background(collection)
                 return
+
+    def sync_collection_in_background(self, collection: ModCollection) -> None:
+        addon_dirs = self.configured_addon_directories()
+        if not addon_dirs:
+            return
+        snapshot = [deepcopy(self.mods[mod_id]) for mod_id in collection.mod_ids if mod_id in self.mods]
+        worker = Worker(sync_collection_files, addon_dirs[0], collection.name, snapshot)
+        worker.signals.failed.connect(lambda message: self._on_collection_sync_failed(collection.name, message))
+        self.collection_sync_pool.start(worker)
+
+    def _on_collection_sync_failed(self, collection_name: str, message: str) -> None:
+        QMessageBox.warning(self, "组合文件同步失败", f"组合「{collection_name}」的文件同步失败：\n{message}")
 
     def filtered_mods(self) -> list[Mod]:
         mods = list(self.mods.values())
+        if self._active_only_filter:
+            mods = [mod for mod in mods if mod.active]
         if self.current_category != "all":
             if self.category_mode == "simple":
                 mods = [
@@ -2242,6 +2413,34 @@ class MainWindow(QMainWindow):
             reverse=True,
         )
 
+    def show_active_mods(self) -> None:
+        self._content_mode = "mods"
+        self._active_only_filter = True
+        self._set_status_selection(self.active_label)
+        self._update_mod_filter_title()
+        self.current_page = 0
+        self.refresh_cards()
+
+    def show_all_mods(self) -> None:
+        self._content_mode = "mods"
+        self._active_only_filter = False
+        self._set_status_selection(self.total_label)
+        self._update_mod_filter_title()
+        self.current_page = 0
+        self.refresh_cards()
+
+    def _set_status_selection(self, selected_button: QPushButton) -> None:
+        for button in (self.total_label, self.active_label, self.conflict_button):
+            button.setProperty("selected", button is selected_button)
+            button.style().unpolish(button)
+            button.style().polish(button)
+            button.update()
+
+    def _update_mod_filter_title(self) -> None:
+        if self._content_mode != "mods" or self.current_category != "all":
+            return
+        self.content_title.setText("已激活 Mod" if self._active_only_filter else "全部 Mod")
+
     def _simple_categories_for(self, mod: Mod) -> set[str]:
         cached = self._simple_category_cache.get(mod.id)
         if cached is None:
@@ -2261,9 +2460,9 @@ class MainWindow(QMainWindow):
     def refresh_stats(self) -> None:
         conflicts = sum(1 for mod in self.mods.values() if mod.conflict_with)
         active = sum(1 for mod in self.mods.values() if mod.active)
-        self.total_label.setText(f"共 {len(self.mods)} 个 Mod")
-        self.active_label.setText(f"已启用 {active} 个")
-        self.conflict_button.setText(f"{conflicts} 个冲突" if conflicts else "无冲突")
+        self.total_label.setText(f"共计{len(self.mods)}")
+        self.active_label.setText(f"已启用 {active}")
+        self.conflict_button.setText(f"冲突 {conflicts}")
         self.conflict_button.setEnabled(conflicts > 0)
         if hasattr(self, "toggle_all_button"):
             all_active = bool(self.mods) and all(mod.active for mod in self.mods.values())
@@ -2284,22 +2483,6 @@ class MainWindow(QMainWindow):
         self._updating_collection_combo = False
         self._update_collection_combo_label()
 
-    def _ensure_default_collection(self) -> None:
-        for collection in self.collections:
-            if collection.name == "default":
-                if collection.mod_ids:
-                    collection.mod_ids = []
-                    self.storage.save_collections(self.collections)
-                return
-        self.collections.insert(
-            0,
-            ModCollection(
-                name="default",
-                mod_ids=[],
-            ),
-        )
-        self.storage.save_collections(self.collections)
-
     def _update_collection_combo_label(self) -> None:
         selected = [
             collection.name
@@ -2319,14 +2502,72 @@ class MainWindow(QMainWindow):
         if self._updating_collection_combo:
             return
         self._selected_collection_names = set(self.collection_combo.checked_values())
+        self.save_selected_collection_names()
         self._update_collection_combo_label()
         if self._selected_collection_names:
+            # Apply the selected collections before rebuilding the card list;
+            # otherwise the active-only view briefly sees the previous state.
+            self.apply_selected_collections()
+            self.show_active_mods()
+            self.restore_selected_collections_in_background()
+        else:
+            self.show_all_mods()
             # Coalesce quick successive checks into one state/card refresh.
             self._collection_apply_timer.start(80)
+
+    def restore_selected_collections_in_background(self) -> None:
+        addon_dirs = self.configured_addon_directories()
+        if not addon_dirs:
+            return
+        show_restore_progress = not self.steam_sync_in_progress
+        if show_restore_progress:
+            self._progress_owner = "restore"
+        self.steam_sync_progress.setRange(0, 1)
+        self.steam_sync_progress.setValue(0)
+        self._set_collection_restore_status(0, 0)
+        if show_restore_progress:
+            self.steam_sync_widget.show()
+        worker = Worker(restore_collection_files, addon_dirs[0], sorted(self._selected_collection_names), progress_callback=None)
+        worker.kwargs["progress_callback"] = worker.signals.progress.emit
+        worker.signals.progress.connect(self._set_collection_restore_status)
+        worker.signals.finished.connect(self.on_collection_restore_finished)
+        worker.signals.failed.connect(self.on_collection_restore_failed)
+        self.collection_sync_pool.start(worker)
+
+    def on_collection_restore_finished(self, restored: int) -> None:
+        if self._progress_owner == "restore":
+            self._progress_owner = None
+            self.steam_sync_widget.hide()
+        # Apply the union of every checked collection even when no file had
+        # to be restored. If files were restored, on_scan_finished applies it
+        # once more after the new Mods are discovered.
+        self.apply_selected_collections()
+        if restored:
+            self.scan_mods(False)
+
+    def on_collection_restore_failed(self, message: str) -> None:
+        if self._progress_owner == "restore":
+            self._progress_owner = None
+            self.steam_sync_widget.hide()
+        self._on_collection_sync_failed("当前组合", message)
+
+    def _set_collection_restore_status(self, completed: int, total: int) -> None:
+        if self._progress_owner != "restore":
+            return
+        self.steam_sync_progress.setRange(0, max(total, 1))
+        self.steam_sync_progress.setValue(completed)
+        percent = round(completed * 100 / total) if total else 100
+        label = self.steam_sync_widget.findChild(QLabel, "steamSyncLabel")
+        if label is not None:
+            label.setText(f"正在恢复组合文件… {completed}/{total}（{percent}%）")
 
     def _apply_pending_collection_selection(self) -> None:
         if self._selected_collection_names:
             self.apply_selected_collections()
+
+    def save_selected_collection_names(self) -> None:
+        self.settings["selected_collection_names"] = sorted(self._selected_collection_names)
+        self.storage.save_settings(self.settings)
 
     def apply_selected_collections(self, write_addonlist: bool = False) -> None:
         selected = [
@@ -2335,6 +2576,12 @@ class MainWindow(QMainWindow):
             if collection.name in self._selected_collection_names
         ]
         if not selected:
+            for mod in self.mods.values():
+                mod.active = False
+            self._rebuild_conflict_index()
+            self.storage.save_mods(self.mods)
+            self._refresh_card_states()
+            self.refresh_stats()
             return
         active_ids = set().union(*(collection.mod_ids for collection in selected))
         for mod in self.mods.values():
@@ -2347,16 +2594,16 @@ class MainWindow(QMainWindow):
         self.refresh_stats()
 
     def delete_collection(self, name: str) -> None:
-        if name == "default" or not any(collection.name == name for collection in self.collections):
-            QMessageBox.information(self, "无法删除", "default 是启动时的基础组合，不能删除。")
+        if not any(collection.name == name for collection in self.collections):
+            QMessageBox.information(self, "无法删除", "找不到指定组合。")
             return
         if QMessageBox.question(self, "删除组合", f"确定删除组合「{name}」吗？") != QMessageBox.Yes:
             return
         self.collections = [collection for collection in self.collections if collection.name != name]
         self._selected_collection_names.discard(name)
-        if not self._selected_collection_names:
-            self._selected_collection_names = {"default"}
+        self.save_selected_collection_names()
         self.storage.save_collections(self.collections)
+        self.sync_collection_in_background(ModCollection(name=name, mod_ids=[]))
         self.refresh_collection_combo()
         self.apply_selected_collections()
 
@@ -2365,14 +2612,19 @@ class MainWindow(QMainWindow):
         if items:
             self.current_category = items[0].data(0, Qt.UserRole)
             self.content_title.setText(items[0].text(0))
+            self._update_mod_filter_title()
             self.current_page = 0
             self.refresh_cards()
 
     def choose_directory(self) -> None:
+        steam_game = self.find_steam_game_executable()
+        saved_game = Path(self.settings["game_exe"]) if self.settings.get("game_exe") else None
+        preferred_game = saved_game if saved_game and saved_game.exists() else steam_game
+        initial_location = str(preferred_game.parent if preferred_game else Path.home())
         game_exe, _filter = QFileDialog.getOpenFileName(
             self,
             "选择 Left 4 Dead 2 游戏程序",
-            self.settings.get("game_exe") or str(Path.home()),
+            initial_location,
             "Left 4 Dead 2 (left4dead2.exe)",
         )
         if not game_exe:
@@ -2390,6 +2642,53 @@ class MainWindow(QMainWindow):
         self.settings["mod_dir"] = str(addon_dirs[0].resolve())
         self.storage.save_settings(self.settings)
         self.scan_mods(True)
+
+    @staticmethod
+    def find_steam_game_executable() -> Path | None:
+        """Find the Steam-installed L4D2 executable for the file dialog default."""
+        steam_roots: list[Path] = []
+        if winreg is not None:
+            for root, subkey in (
+                (winreg.HKEY_CURRENT_USER, r"Software\Valve\Steam"),
+                (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Valve\Steam"),
+                (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Valve\Steam"),
+            ):
+                try:
+                    with winreg.OpenKey(root, subkey) as key:
+                        for value_name in ("SteamPath", "InstallPath"):
+                            try:
+                                value, _ = winreg.QueryValueEx(key, value_name)
+                            except OSError:
+                                continue
+                            if value:
+                                steam_roots.append(Path(value))
+                except OSError:
+                    continue
+        steam_roots.extend(
+            Path(path) for path in (
+                os.environ.get("PROGRAMFILES(X86)"),
+                os.environ.get("PROGRAMFILES"),
+            ) if path
+        )
+
+        library_roots: set[Path] = set()
+        for steam_root in steam_roots:
+            steam_root = steam_root.resolve()
+            library_roots.add(steam_root)
+            library_file = steam_root / "steamapps" / "libraryfolders.vdf"
+            try:
+                text = library_file.read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                continue
+            # Supports both old and new libraryfolders.vdf layouts.
+            for match in re.finditer(r'"(?:path|\d+)"\s*"([^"]+)"', text, re.IGNORECASE):
+                library_roots.add(Path(match.group(1).replace("\\\\", "\\")))
+
+        for library_root in library_roots:
+            candidate = library_root / "steamapps" / "common" / "Left 4 Dead 2" / "left4dead2.exe"
+            if candidate.exists():
+                return candidate.resolve()
+        return None
 
     @staticmethod
     def addon_directories(executable: Path) -> list[Path]:
@@ -2435,6 +2734,10 @@ class MainWindow(QMainWindow):
             if key in self.mods:
                 self.mods[key].active = True
         self._apply_steam_cache(self.mods)
+        # A collection switch may have restored files just before this scan.
+        # Re-apply the selected collection so every newly discovered Mod in it
+        # is enabled as well.
+        self.apply_selected_collections()
         self._rebuild_conflict_index()
         self.storage.save_mods(self.mods)
         self.refresh_cards(); self.refresh_stats(); self.set_busy(False)
@@ -2452,9 +2755,33 @@ class MainWindow(QMainWindow):
             self.storage.save_mods(self.mods)
             if not self.write_addonlist():
                 return
-            subprocess.Popen([str(executable)], cwd=str(executable.parent))
+            if self.steam_is_installed():
+                os.startfile("steam://rungameid/550")
+            else:
+                subprocess.Popen([str(executable)], cwd=str(executable.parent))
         except OSError as exc:
             QMessageBox.critical(self, "启动失败", f"游戏启动失败：{exc}")
+
+    @staticmethod
+    def steam_is_installed() -> bool:
+        if winreg is not None:
+            for root, subkey in (
+                (winreg.HKEY_CURRENT_USER, r"Software\Valve\Steam"),
+                (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Valve\Steam"),
+                (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Valve\Steam"),
+            ):
+                try:
+                    with winreg.OpenKey(root, subkey):
+                        return True
+                except OSError:
+                    continue
+        return any(
+            path.exists()
+            for path in (
+                Path(os.environ.get("PROGRAMFILES(X86)", "")) / "Steam" / "steam.exe",
+                Path(os.environ.get("PROGRAMFILES", "")) / "Steam" / "steam.exe",
+            )
+        )
 
     def fetch_steam_info(self) -> None:
         if self.steam_sync_in_progress:
@@ -2477,6 +2804,7 @@ class MainWindow(QMainWindow):
         ) != QMessageBox.Yes:
             return
         self.steam_sync_in_progress = True
+        self._progress_owner = "steam"
         self._steam_cancel_event.clear()
         self.fetch_button.setEnabled(False)
         self.fetch_button.setText("")
@@ -2496,6 +2824,37 @@ class MainWindow(QMainWindow):
         worker.signals.cancelled.connect(self.on_steam_cancelled)
         self.thread_pool.start(worker)
 
+    def sync_single_mod_steam(self, mod_id: str) -> None:
+        if self.steam_sync_in_progress:
+            return
+        mod = self.mods.get(mod_id)
+        if mod is None or not mod.workshop_id:
+            QMessageBox.information(self, "无法同步", "当前 Mod 没有可识别的 Workshop ID。")
+            return
+        pending = deepcopy(mod)
+        # This action explicitly refreshes the selected Mod, even when it has
+        # already been synchronized before.
+        pending.steam_loaded = False
+        self.steam_sync_in_progress = True
+        self._progress_owner = "steam"
+        self._steam_cancel_event.clear()
+        self.fetch_button.setEnabled(False)
+        self.fetch_button.setText("")
+        self.fetch_button.setIcon(self.style().standardIcon(QStyle.SP_BrowserStop))
+        self.fetch_button.setToolTip("取消 Steam 同步")
+        self.fetch_button.setEnabled(True)
+        self.steam_sync_progress.setRange(0, 1)
+        self.steam_sync_progress.setValue(0)
+        self._set_steam_sync_status(0, 1)
+        self.steam_sync_widget.show()
+        worker = Worker(fetch_steam_for_mods, {mod_id: pending}, progress_callback=None, cancel_event=self._steam_cancel_event)
+        worker.kwargs["progress_callback"] = worker.signals.progress.emit
+        worker.signals.progress.connect(self._set_steam_sync_status)
+        worker.signals.finished.connect(self.on_steam_finished)
+        worker.signals.failed.connect(self.on_steam_failed)
+        worker.signals.cancelled.connect(self.on_steam_cancelled)
+        self.thread_pool.start(worker)
+
     def on_steam_finished(self, mods: dict[str, Mod]) -> None:
         for mod_id, updated in mods.items():
             local = self.mods.get(mod_id)
@@ -2505,18 +2864,24 @@ class MainWindow(QMainWindow):
                 setattr(local, field, getattr(updated, field))
         self.steam_sync_in_progress = False
         self._reset_steam_sync_controls()
-        self.steam_sync_widget.hide()
+        if self._progress_owner == "steam":
+            self._progress_owner = None
+            self.steam_sync_widget.hide()
         self._simple_category_cache.clear()
+        self._card_cache.clear()
         self.storage.save_mods(self.mods)
         self._save_steam_cache()
-        QMessageBox.information(self, "Steam 同步完成", "Steam 信息已获取完成。点击“确定”后刷新页面。")
         self.refresh_cards()
+        self.refresh_tree()
         self.refresh_stats()
+        QMessageBox.information(self, "Steam 同步完成", "Steam 信息已获取完成，页面已刷新。")
 
     def on_steam_failed(self, message: str) -> None:
         self.steam_sync_in_progress = False
         self._reset_steam_sync_controls()
-        self.steam_sync_widget.hide()
+        if self._progress_owner == "steam":
+            self._progress_owner = None
+            self.steam_sync_widget.hide()
         QMessageBox.critical(self, "Steam 同步失败", message)
 
     def cancel_steam_sync(self) -> None:
@@ -2534,16 +2899,20 @@ class MainWindow(QMainWindow):
     def on_steam_cancelled(self) -> None:
         self.steam_sync_in_progress = False
         self._reset_steam_sync_controls()
-        self.steam_sync_widget.hide()
+        if self._progress_owner == "steam":
+            self._progress_owner = None
+            self.steam_sync_widget.hide()
         QMessageBox.information(self, "Steam 同步已取消", "已停止后续 Mod 的 Steam 数据同步。")
 
     def _reset_steam_sync_controls(self) -> None:
-        self.fetch_button.setText("")
+        self.fetch_button.setText("同步 Steam")
         self.fetch_button.setIcon(self.style().standardIcon(QStyle.SP_ArrowDown))
         self.fetch_button.setToolTip("同步 Steam：获取创意工坊 Mod 的名称、订阅数和标签")
         self.fetch_button.setEnabled(True)
 
     def _set_steam_sync_status(self, completed: int, total: int) -> None:
+        if self._progress_owner != "steam":
+            return
         self.steam_sync_progress.setRange(0, max(total, 1))
         self.steam_sync_progress.setValue(completed)
         percent = round(completed * 100 / total) if total else 100
@@ -2577,6 +2946,7 @@ class MainWindow(QMainWindow):
         conflicted = [mod for mod in self.mods.values() if mod.active and mod.conflict_with]
         if not conflicted:
             return
+        self._set_status_selection(self.conflict_button)
         host = QWidget()
         host.setObjectName("mainConflictHost")
         host.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
@@ -2690,35 +3060,82 @@ class MainWindow(QMainWindow):
         self.storage.save_mods(self.mods)
         self._refresh_card_states(affected)
         self.refresh_stats()
+        # The report is a one-shot view: its cards hold the old conflict graph.
+        # Rebuild it after a double-click instead of only refreshing the library
+        # cards, otherwise disabled Mods remain visible in the report.
+        if self._content_mode == "detail":
+            if any(mod.active and mod.conflict_with for mod in self.mods.values()):
+                self.show_conflicts()
+            else:
+                empty = QLabel("No remaining conflicts")
+                empty.setObjectName("emptyText")
+                empty.setAlignment(Qt.AlignHCenter | Qt.AlignVCenter)
+                self._show_content_widget(self.content_title.text(), "No remaining conflicts", empty)
 
     def save_collection(self) -> None:
         active_ids = [mod.id for mod in self.mods.values() if mod.active]
         selected = self._selected_collection_names
         if len(selected) == 1:
             current_name = next(iter(selected))
-            if current_name != "default":
-                for collection in self.collections:
-                    if collection.name == current_name:
-                        collection.mod_ids = active_ids
-                        break
-                self.storage.save_collections(self.collections)
-                QMessageBox.information(self, "保存完成", f"已更新组合「{current_name}」。")
+            if not self.confirm_save_collection(current_name):
                 return
+            for collection in self.collections:
+                if collection.name == current_name:
+                    collection.mod_ids = active_ids
+                    self.sync_collection_in_background(collection)
+                    break
+            self.storage.save_collections(self.collections)
+            QMessageBox.information(self, "保存完成", f"已更新组合「{current_name}」。")
+            return
         if not active_ids:
             QMessageBox.information(self, "没有已启用 Mod", "请先至少启用一个 Mod。")
             return
         name, ok = QInputDialog.getText(self, "保存 Mod 组合", "组合名称：")
         if ok and name.strip():
             name = name.strip()
-            if name == "default":
-                QMessageBox.warning(self, "无法保存", "default 是默认空组合，请换一个组合名称。")
+            if not self.confirm_save_collection(name):
                 return
             self.collections = [item for item in self.collections if item.name != name]
             self.collections.append(ModCollection(name=name, mod_ids=active_ids))
             self.storage.save_collections(self.collections)
+            self.sync_collection_in_background(self.collections[-1])
             self._selected_collection_names = {name}
+            self.save_selected_collection_names()
             self.refresh_collection_combo()
             QMessageBox.information(self, "保存完成", f"已保存「{name}」。")
+
+    def save_collection_as_new(self) -> None:
+        active_ids = [mod.id for mod in self.mods.values() if mod.active]
+        if not active_ids:
+            QMessageBox.information(self, "没有已启用 Mod", "请先至少启用一个 Mod。")
+            return
+        name, ok = QInputDialog.getText(self, "另存为新组合", "组合名称：")
+        if not ok or not name.strip():
+            return
+        name = name.strip()
+        if any(collection.name == name for collection in self.collections):
+            QMessageBox.warning(self, "无法保存", f"组合「{name}」已存在，请换一个名称。")
+            return
+        if not self.confirm_save_collection(name):
+            return
+        collection = ModCollection(name=name, mod_ids=active_ids)
+        self.collections.append(collection)
+        self.storage.save_collections(self.collections)
+        self.sync_collection_in_background(collection)
+        self._selected_collection_names = {name}
+        self.save_selected_collection_names()
+        self.refresh_collection_combo()
+
+    def confirm_save_collection(self, collection_name: str) -> bool:
+        message = (
+            f"是否将当前mods存入[{collection_name}]中？\n\n"
+            "保存后同步会复制相关mods到组合同名文件夹！"
+        )
+        return QMessageBox.question(
+            self,
+            "保存当前组合",
+            message,
+        ) == QMessageBox.Yes
 
     def write_addonlist(self) -> bool:
         addon_dirs = self.configured_addon_directories()
@@ -2752,9 +3169,15 @@ class MainWindow(QMainWindow):
         QMessageBox.critical(self, "操作失败", message)
 
     def set_busy(self, busy: bool, message: str = "") -> None:
-        for button in (self.choose_button, self.refresh_button, self.fetch_button, self.toggle_all_button, self.save_button, self.launch_button):
+        for button in (self.choose_button, self.refresh_button, self.fetch_button, self.toggle_all_button, self.save_button, self.save_as_button, self.launch_button):
             button.setEnabled(not busy)
         self.fetch_button.setEnabled(not busy and not self.steam_sync_in_progress)
+
+    def closeEvent(self, event) -> None:
+        self.save_selected_collection_names()
+        self.storage.save_mods(self.mods)
+        self.storage.save_collections(self.collections)
+        super().closeEvent(event)
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
@@ -2879,7 +3302,7 @@ def main() -> int:
     QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
     QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
     app = QApplication(sys.argv)
-    app.setWindowIcon(QIcon())
+    app.setWindowIcon(QIcon(str(TITLE_ICON)))
     window = MainWindow()
     window.show()
     return app.exec_()

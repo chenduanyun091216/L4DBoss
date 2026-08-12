@@ -15,7 +15,7 @@ def scan_mod_directory(directory: Path | list[Path], existing: dict[str, Mod] | 
     existing = existing or {}
     result = {} if refresh_all else dict(existing)
     directories = [directory] if isinstance(directory, Path) else directory
-    file_paths = [file_path for folder in directories if folder.exists() for file_path in folder.glob("*.vpk")]
+    file_paths = _scan_files(directories)
     for file_path in sorted(file_paths):
         mod_id = make_mod_id(file_path)
         if not refresh_all and mod_id in result:
@@ -29,6 +29,18 @@ def scan_mod_directory(directory: Path | list[Path], existing: dict[str, Mod] | 
         result[mod_id] = parse_vpk_file(file_path, mod_id)
     valid_paths = {str(path.resolve()) for path in file_paths}
     return {mod_id: mod for mod_id, mod in result.items() if str(Path(mod.file_path).resolve()) in valid_paths}
+
+
+def _scan_files(directories: list[Path]) -> list[Path]:
+    """Scan only the first level of addons and addons/workshop, once each."""
+    candidates = [file_path for folder in directories if folder.exists() for file_path in folder.glob("*.vpk")]
+    selected: dict[str, Path] = {}
+    for file_path in candidates:
+        mod_id = make_mod_id(file_path)
+        previous = selected.get(mod_id)
+        if previous is None or (file_path.parent.name.casefold() == "workshop" and previous.parent.name.casefold() != "workshop"):
+            selected[mod_id] = file_path
+    return sorted(selected.values(), key=lambda path: str(path).casefold())
 
 
 def parse_vpk_file(file_path: Path, mod_id: str | None = None) -> Mod:
@@ -100,8 +112,17 @@ def detect_conflicts(mods: dict[str, Mod]) -> dict[str, list[str]]:
     return {mod_id: sorted(values) for mod_id, values in conflicts.items() if values}
 
 
+NON_CONFLICTING_VSCRIPT_FILES = frozenset(
+    {
+        "scripts/vscripts/mapspawn_addon.nut",
+        "scripts/vscripts/response_testbed_addon.nut",
+        "scripts/vscripts/scriptedmode_addon.nut",
+        "scripts/vscripts/director_base_addon.nut",
+    }
+)
+
+
 def is_conflict_relevant_path(path: str) -> bool:
-    ignored_suffixes = (".txt", ".md", ".res")
-    if path.endswith(ignored_suffixes):
-        return False
-    return path.startswith(("materials/", "models/", "scripts/", "sound/", "soundscape/", "particles/", "missions/", "maps/"))
+    """Match Funky's conflict rule: nested paths except parallel VScript entry points."""
+    normalized = str(path).replace("\\", "/").lower().strip("/")
+    return "/" in normalized and normalized not in NON_CONFLICTING_VSCRIPT_FILES

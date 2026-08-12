@@ -1,0 +1,9 @@
+py -m nuitka `
+  --mode=onefile `
+  --enable-plugin=pyqt5 `
+  --windows-console-mode=disable `
+  --windows-icon-from-ico=files/title.ico `
+  --include-data-dir=files=files `
+  --output-dir=build `
+  --output-filename=L4DBoss.exe `
+  run.py

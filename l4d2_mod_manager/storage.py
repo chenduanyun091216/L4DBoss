@@ -11,7 +11,16 @@ class AppStorage:
         self.base_dir = base_dir
         self.data_dir = base_dir / "data"
         # Create both the application data root and its data subdirectory.
-        self.data_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            self.data_dir.mkdir(parents=True, exist_ok=True)
+            self.data_dir.is_dir()
+        except OSError:
+            # Some installations have a damaged/denied LOCALAPPDATA ACL. Keep
+            # the app usable with a persistent local fallback instead of
+            # crashing before the main window is created.
+            self.base_dir = Path.cwd() / ".l4d2_user_data"
+            self.data_dir = self.base_dir / "data"
+            self.data_dir.mkdir(parents=True, exist_ok=True)
         self.settings_file = self.data_dir / "settings.json"
         self.mods_file = self.data_dir / "mods.json"
         self.steam_cache_file = self.data_dir / "steam_cache.json"
