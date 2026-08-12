@@ -19,7 +19,13 @@ def scan_mod_directory(directory: Path | list[Path], existing: dict[str, Mod] | 
     for file_path in sorted(file_paths):
         mod_id = make_mod_id(file_path)
         if not refresh_all and mod_id in result:
-            continue
+            cached = result[mod_id]
+            try:
+                stat = file_path.stat()
+                if (cached.file_size, cached.file_mtime_ns) == (stat.st_size, stat.st_mtime_ns):
+                    continue
+            except OSError:
+                continue
         result[mod_id] = parse_vpk_file(file_path, mod_id)
     valid_paths = {str(path.resolve()) for path in file_paths}
     return {mod_id: mod for mod_id, mod in result.items() if str(Path(mod.file_path).resolve()) in valid_paths}
@@ -31,6 +37,7 @@ def parse_vpk_file(file_path: Path, mod_id: str | None = None) -> Mod:
     title = humanize_title(file_path.stem)
     image_path = find_preview_image(file_path)
     categories = infer_categories(title, files, file_name=file_path.name)
+    stat = file_path.stat()
     return Mod(
         id=mod_id,
         file_path=str(file_path.resolve()),
@@ -39,6 +46,8 @@ def parse_vpk_file(file_path: Path, mod_id: str | None = None) -> Mod:
         image_path=str(image_path.resolve()) if image_path else None,
         categories=categories,
         files=files,
+        file_size=stat.st_size,
+        file_mtime_ns=stat.st_mtime_ns,
     )
 
 

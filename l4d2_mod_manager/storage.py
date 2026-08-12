@@ -10,7 +10,8 @@ class AppStorage:
     def __init__(self, base_dir: Path):
         self.base_dir = base_dir
         self.data_dir = base_dir / "data"
-        self.data_dir.mkdir(exist_ok=True)
+        # Create both the application data root and its data subdirectory.
+        self.data_dir.mkdir(parents=True, exist_ok=True)
         self.settings_file = self.data_dir / "settings.json"
         self.mods_file = self.data_dir / "mods.json"
         self.steam_cache_file = self.data_dir / "steam_cache.json"

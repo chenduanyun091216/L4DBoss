@@ -22,6 +22,8 @@ class Mod:
     active: bool = False
     conflict_with: list[str] = field(default_factory=list)
     steam_loaded: bool = False
+    file_size: int = 0
+    file_mtime_ns: int = 0
 
     @property
     def display_subscriptions(self) -> str:

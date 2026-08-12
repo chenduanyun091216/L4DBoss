@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sys
 import subprocess
 import ctypes
@@ -27,6 +28,11 @@ from .vpk_scanner import is_conflict_relevant_path, scan_mod_directory
 APP_ROOT = Path(__file__).resolve().parent.parent
 BACKGROUND_IMAGE = APP_ROOT / "files" / "bg.png"
 TITLE_IMAGE = APP_ROOT / "files" / "title.png"
+# Runtime data is kept outside the bundled application so it remains writable
+# and survives Nuitka onefile extraction.
+USER_DATA_ROOT = Path(
+    os.environ.get("LOCALAPPDATA", str(Path.home()))
+) / "L4DBoss"
 UI_SCALE = 1.0
 PREVIEW_CACHE: dict[str, QPixmap] = {}
 
@@ -1067,11 +1073,13 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("L4D2 Boss · 求生之路 2 Mod 管理器")
         self.resize(ui(1200), ui(820))
         self.setMinimumSize(ui(1020), ui(680))
-        self.storage = AppStorage(APP_ROOT)
+        self.storage = AppStorage(USER_DATA_ROOT)
         self.settings = self.storage.load_settings()
+        self._simple_category_cache: dict[str, set[str]] = {}
         self.mods = self.storage.load_mods()
         self.steam_cache = self.storage.load_steam_cache()
         if self._reclassify_loaded_mods():
+            self._simple_category_cache.clear()
             self.storage.save_mods(self.mods)
         self.collections = self.storage.load_collections()
         self._ensure_default_collection()
@@ -1092,6 +1100,9 @@ class MainWindow(QMainWindow):
         self._cards_render_token = 0
         self._cards_ready_for_reflow = False
         self._mod_sort_cache: dict[str, int] = {}
+        self._search_refresh_timer = QTimer(self)
+        self._search_refresh_timer.setSingleShot(True)
+        self._search_refresh_timer.timeout.connect(self.refresh_cards)
         self._card_refresh_pending = False
         self._content_alignment_pending = False
         self._content_mode = "mods"
@@ -1749,12 +1760,21 @@ class MainWindow(QMainWindow):
                 card.refresh_state()
 
     def refresh_tree(self) -> None:
+        selected = self.current_category
         self.category_tree.clear()
         categories = SIMPLE_CATEGORIES if self.category_mode == "simple" else CATEGORIES
         for category in categories:
             self.category_tree.addTopLevelItem(self._make_tree_item(category, 0))
         self.category_tree.expandAll()
-        self.category_tree.setCurrentItem(self.category_tree.topLevelItem(0))
+        target = self.category_tree.topLevelItem(0)
+        stack = [target] if target is not None else []
+        while stack:
+            item = stack.pop()
+            if item.data(0, Qt.UserRole) == selected:
+                target = item
+                break
+            stack.extend(item.child(index) for index in range(item.childCount()))
+        self.category_tree.setCurrentItem(target)
 
     def _make_tree_item(self, entry, depth: int) -> QTreeWidgetItem:
         if isinstance(entry, tuple):
@@ -1855,7 +1875,8 @@ class MainWindow(QMainWindow):
             return
         # A complete page is laid out in one pass. This prevents the initial
         # load from looking like cards are sliding into place row by row.
-        batch_size = len(page_mods)
+        # Keep each event-loop slice small so large pages remain interactive.
+        batch_size = 12
         for index, mod in enumerate(page_mods[start:start + batch_size], start=start):
             card = self._card_cache.get(mod.id)
             if card is None:
@@ -1902,7 +1923,7 @@ class MainWindow(QMainWindow):
 
     def on_search_changed(self) -> None:
         self.current_page = 0
-        self.refresh_cards()
+        self._search_refresh_timer.start(120)
 
     def card_columns(self) -> int:
         width = self._card_viewport_width()
@@ -2202,7 +2223,7 @@ class MainWindow(QMainWindow):
             if self.category_mode == "simple":
                 mods = [
                     mod for mod in mods
-                    if self.current_category in simple_categories(mod.categories, mod.title, mod.files, mod.file_name)
+                    if self.current_category in self._simple_categories_for(mod)
                 ]
             else:
                 mods = [mod for mod in mods if self.current_category in mod.categories]
@@ -2220,6 +2241,13 @@ class MainWindow(QMainWindow):
             key=lambda mod: (self._mod_sort_cache.get(mod.id, 0), mod.title.casefold()),
             reverse=True,
         )
+
+    def _simple_categories_for(self, mod: Mod) -> set[str]:
+        cached = self._simple_category_cache.get(mod.id)
+        if cached is None:
+            cached = simple_categories(mod.categories, mod.title, mod.files, mod.file_name)
+            self._simple_category_cache[mod.id] = cached
+        return cached
 
     @staticmethod
     def _time_sort_key(mod: Mod) -> tuple[int, str]:
@@ -2401,6 +2429,8 @@ class MainWindow(QMainWindow):
     def on_scan_finished(self, mods: dict[str, Mod]) -> None:
         old_active = {key for key, mod in self.mods.items() if mod.active}
         self.mods = mods
+        self._simple_category_cache.clear()
+        self._mod_sort_cache.clear()
         for key in old_active:
             if key in self.mods:
                 self.mods[key].active = True
@@ -2476,6 +2506,7 @@ class MainWindow(QMainWindow):
         self.steam_sync_in_progress = False
         self._reset_steam_sync_controls()
         self.steam_sync_widget.hide()
+        self._simple_category_cache.clear()
         self.storage.save_mods(self.mods)
         self._save_steam_cache()
         QMessageBox.information(self, "Steam 同步完成", "Steam 信息已获取完成。点击“确定”后刷新页面。")
