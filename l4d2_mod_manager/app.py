@@ -1,27 +1,32 @@
 from __future__ import annotations
 
 import sys
+import subprocess
+import ctypes
+from html import escape
 from collections import Counter
 from copy import deepcopy
 from pathlib import Path
 from threading import Event
 
 from PyQt5.QtCore import QEvent, QObject, QRunnable, QSize, QTimer, QUrl, Qt, QThreadPool, pyqtSignal
-from PyQt5.QtGui import QColor, QDesktopServices, QIcon, QLinearGradient, QPainter, QPixmap
+from PyQt5.QtGui import QColor, QDesktopServices, QFont, QIcon, QLinearGradient, QPainter, QPixmap
 from PyQt5.QtWidgets import (
     QAction, QApplication, QComboBox, QDialog, QFileDialog, QFrame, QGridLayout,
     QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMainWindow, QMenu, QMessageBox,
-    QProgressBar, QPushButton, QScrollArea, QSizePolicy, QSplitter, QStyle, QTreeWidget,
-    QTreeWidgetItem, QVBoxLayout, QWidget,
+    QProgressBar, QPushButton, QScrollArea, QSizePolicy, QSplitter, QStyle,
+    QStyledItemDelegate, QStyleOptionViewItem, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget, QWidgetAction,
 )
 
-from .categories import CATEGORIES, infer_categories
+from .categories import CATEGORIES, SIMPLE_CATEGORIES, infer_categories, simple_categories
 from .models import Mod, ModCollection
 from .steam_client import SteamClient
 from .storage import AppStorage
 from .vpk_scanner import is_conflict_relevant_path, scan_mod_directory
 
 APP_ROOT = Path(__file__).resolve().parent.parent
+BACKGROUND_IMAGE = APP_ROOT / "files" / "bg.png"
+TITLE_IMAGE = APP_ROOT / "files" / "title.png"
 UI_SCALE = 1.0
 PREVIEW_CACHE: dict[str, QPixmap] = {}
 
@@ -105,48 +110,122 @@ class TwoLineElidedLabel(QLabel):
         return text[:end].rstrip(), text[end:].lstrip()
 
 
+def mod_type_tags(mod: Mod) -> list[tuple[str, str]]:
+    """Return at most three useful type tags, preferring concrete targets."""
+    categories = set(mod.categories)
+    tags: list[tuple[str, str]] = []
+    seen: set[str] = set()
+
+    def add(category: str, label: str, color: str) -> None:
+        if category in categories and label not in seen and len(tags) < 3:
+            tags.append((label, color))
+            seen.add(label)
+
+    gun_labels = {
+        "rifle_ak47": "AK-47", "rifle_m16": "M16", "rifle_desert": "SCAR", "rifle_sg552": "SG552",
+        "shotgun_pump": "泵动霰弹枪", "shotgun_chrome": "铬合金霰弹枪", "shotgun_auto": "战术霰弹枪",
+        "shotgun_spas": "SPAS-12", "smg_uzi": "Uzi", "smg_silenced": "消音冲锋枪", "smg_mp5": "MP5",
+        "sniper_hunting": "猎枪", "sniper_military": "军用狙击枪", "sniper_awp": "AWP", "sniper_scout": "Scout",
+        "pistol_p220": "P220", "pistol_dual": "双持手枪", "pistol_magnum": "马格南",
+        "grenade_launcher": "榴弹发射器", "m60": "M60",
+    }
+    for category, label in gun_labels.items():
+        add(category, label, "#365f9f")
+    if not tags:
+        for category, label in (("pistol", "手枪"), ("smg", "冲锋枪"), ("rifle", "步枪"), ("shotgun", "霰弹枪"), ("sniper", "狙击枪"), ("weapons", "枪械")):
+            add(category, label, "#365f9f")
+
+    melee_labels = {
+        "melee_fireaxe": "消防斧", "melee_katana": "武士刀", "melee_machete": "砍刀",
+        "melee_frying_pan": "平底锅", "melee_bat": "棒球棍", "melee_cricket_bat": "板球棒",
+        "melee_crowbar": "撬棍", "melee_electric_guitar": "电吉他", "melee_golfclub": "高尔夫球杆",
+        "melee_pitchfork": "干草叉", "melee_shovel": "铲子", "melee_tonfa": "警棍",
+        "melee_chainsaw": "电锯", "melee_knife": "小刀", "melee": "近战武器",
+    }
+    for category, label in melee_labels.items():
+        add(category, label, "#8b5a9f")
+
+    survivor_labels = {
+        "bill": "角色 · 比尔", "francis": "角色 · 弗朗西斯", "louis": "角色 · 路易斯", "zoey": "角色 · 佐伊",
+        "coach": "角色 · 教练", "ellis": "角色 · 艾利斯", "nick": "角色 · 尼克", "rochelle": "角色 · 罗谢尔",
+        "survivors": "角色",
+    }
+    for category, label in survivor_labels.items():
+        add(category, label, "#3b8b78")
+
+    infected_labels = {
+        "common_infected": "感染者 · 普通", "boomer": "感染者 · Boomer", "charger": "感染者 · Charger",
+        "hunter": "感染者 · Hunter", "jockey": "感染者 · Jockey", "smoker": "感染者 · Smoker",
+        "spitter": "感染者 · Spitter", "tank": "感染者 · Tank", "witch": "感染者 · Witch",
+        "infected": "感染者",
+    }
+    for category, label in infected_labels.items():
+        add(category, label, "#a15a50")
+
+    if not tags:
+        fallback_labels = {
+            "campaigns": "地图", "items": "物品", "throwable": "投掷物", "sounds": "声音", "music": "音乐",
+            "scripts": "脚本", "ui": "界面", "models": "模型", "textures": "贴图", "miscellaneous": "杂项",
+        }
+        for category, label in fallback_labels.items():
+            add(category, label, "#526073")
+    return tags
+
+
 class ModCard(QFrame):
     clicked = pyqtSignal(str)
     context_requested = pyqtSignal(str, object)
 
-    def __init__(self, mod: Mod, collection_names: list[str] | None = None):
+    def __init__(self, mod: Mod, collection_names: list[str] | None = None, width: int | None = None):
         super().__init__()
         self.mod = mod
+        card_width = width or ui(214)
         self.setObjectName(
             "modCardConflict" if mod.active and mod.conflict_with else ("modCardActive" if mod.active else "modCard")
         )
         self.setCursor(Qt.PointingHandCursor)
-        self.setFixedSize(ui(214), ui(294))
+        self.setFixedSize(card_width, ui(250))
         self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(ui(12), ui(12), ui(12), ui(12))
-        layout.setSpacing(ui(8))
+        layout.setContentsMargins(ui(10), ui(8), ui(10), ui(8))
+        layout.setSpacing(ui(4))
         preview = QLabel()
         preview.setObjectName("preview")
         preview.setAlignment(Qt.AlignCenter)
-        preview.setPixmap(make_preview_pixmap(mod))
+        preview.setFixedHeight(ui(76))
+        preview.setPixmap(make_preview_pixmap(mod, card_width - ui(20), ui(76)))
         layout.addWidget(preview)
 
         title = TwoLineElidedLabel(mod.title or mod.file_name)
         title.setObjectName("cardTitle")
-        title.setFixedHeight(ui(40))
+        title.setToolTip(mod.title or mod.file_name)
+        # Two Chinese/English title lines need enough line-height to avoid the
+        # second line being clipped; metadata then flows beneath the full title.
+        title.setFixedHeight(ui(38))
         layout.addWidget(title)
 
         code = mod.workshop_id or Path(mod.file_name).stem
-        meta_lines = [f"WORKSHOP  {code}"]
+        meta_parts = [code]
         stats = []
         if mod.subscriptions > 0:
             stats.append(f"订阅 {mod.display_subscriptions}")
         if mod.rating > 0:
             stats.append(f"评分 {mod.rating:.1f}")
         if stats:
-            meta_lines.append("  ·  ".join(stats))
-        meta = QLabel("\n".join(meta_lines))
+            meta_parts.extend(stats)
+        meta = QLabel("  ·  ".join(meta_parts))
         meta.setObjectName("cardMeta")
         meta.setWordWrap(True)
-        meta.setFixedHeight(ui(32))
+        meta.setFixedHeight(ui(16))
         layout.addWidget(meta)
+
+        type_labels = [text for text, _color in mod_type_tags(mod)]
+        type_summary = QLabel(f"tags: {' '.join(type_labels)}" if type_labels else "tags: -")
+        type_summary.setObjectName("typeSummary")
+        type_summary.setToolTip("类型标签：" + ("、".join(type_labels) if type_labels else "暂无"))
+        type_summary.setFixedHeight(ui(16))
+        layout.addWidget(type_summary)
 
         tags = QHBoxLayout()
         self.tags_layout = tags
@@ -164,6 +243,7 @@ class ModCard(QFrame):
         button = QPushButton("禁用 Mod" if mod.active else "启用 Mod")
         button.setObjectName("cardActionActive" if mod.active else "cardAction")
         self.toggle_button = button
+        button.setFixedHeight(ui(22))
         button.clicked.connect(lambda: self.clicked.emit(self.mod.id))
         action_row.addWidget(button, 1)
         layout.addLayout(action_row)
@@ -268,6 +348,32 @@ class DragHeader(QFrame):
         self._drag_offset = None
         event.accept()
 
+    def mouseDoubleClickEvent(self, event) -> None:
+        if event.button() == Qt.LeftButton:
+            self.target.toggle_maximized()
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
+
+
+class BackgroundSurface(QWidget):
+    """Low-contrast full-window image treatment that keeps controls readable."""
+
+    def __init__(self, image_path: Path, parent=None):
+        super().__init__(parent)
+        self._background = QPixmap(str(image_path)) if image_path.exists() else QPixmap()
+
+    def paintEvent(self, _event) -> None:
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), QColor("#10141c"))
+        if not self._background.isNull():
+            scaled = self._background.scaled(self.size(), Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
+            x = (self.width() - scaled.width()) // 2
+            y = (self.height() - scaled.height()) // 2
+            painter.setOpacity(0.09)
+            painter.drawPixmap(x, y, scaled)
+        painter.end()
+
 
 class LegacyConflictCard(QFrame):
     disable_requested = pyqtSignal(str)
@@ -313,24 +419,27 @@ class ConflictCard(QFrame):
     """Compact conflict item. Double-clicking it disables the represented Mod."""
     disable_requested = pyqtSignal(str)
 
-    def __init__(self, mod: Mod):
+    def __init__(self, mod: Mod, width: int | None = None):
         super().__init__()
         self.mod = mod
+        card_width = width or ui(208)
         self.setObjectName("conflictCard")
         self.setCursor(Qt.PointingHandCursor)
-        self.setFixedSize(ui(208), ui(210))
+        self.setFixedSize(card_width, ui(254))
         self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(ui(10), ui(10), ui(10), ui(10))
-        layout.setSpacing(ui(6))
+        layout.setSpacing(ui(5))
         preview = QLabel()
         preview.setObjectName("conflictPreview")
         preview.setAlignment(Qt.AlignCenter)
-        preview.setPixmap(make_preview_pixmap(mod))
+        preview.setFixedHeight(ui(78))
+        preview.setPixmap(make_preview_pixmap(mod, card_width - ui(20), ui(78)))
         layout.addWidget(preview)
         title = TwoLineElidedLabel(mod.title or mod.file_name)
         title.setObjectName("cardTitle")
-        title.setFixedHeight(ui(36))
+        title.setToolTip(mod.title or mod.file_name)
+        title.setFixedHeight(ui(32))
         title_row = QHBoxLayout()
         title_row.setContentsMargins(0, 0, 0, 0)
         title_row.setSpacing(ui(6))
@@ -343,9 +452,31 @@ class ConflictCard(QFrame):
         count_badge.setToolTip(f"Conflicts with {conflict_count} enabled Mod(s)")
         title_row.addWidget(count_badge, 0, Qt.AlignTop)
         layout.addLayout(title_row)
-        hint = QLabel("双击卡片以禁用")
+        code = mod.workshop_id or Path(mod.file_name).stem
+        details = [f"WORKSHOP {code}"]
+        if mod.subscriptions > 0:
+            details.append(f"订阅 {mod.display_subscriptions}")
+        meta = QLabel("  ·  ".join(details))
+        meta.setObjectName("conflictMeta")
+        meta.setToolTip(f"Workshop ID: {code}")
+        layout.addWidget(meta)
+        tags = QHBoxLayout()
+        tags.setSpacing(ui(5))
+        tags.addWidget(make_tag("冲突", "#b84752"))
+        tags.addWidget(make_tag_button("STEAM" if mod.steam_loaded and mod.workshop_id else "本地", "#365f9f" if mod.steam_loaded and mod.workshop_id else "#526073", "打开来源", self.open_source))
+        tags.addStretch(1)
+        layout.addLayout(tags)
+        hint = QLabel("双击卡片即可禁用")
         hint.setObjectName("conflictCaption")
         layout.addWidget(hint)
+
+    def open_source(self) -> None:
+        if self.mod.steam_loaded and self.mod.workshop_id:
+            QDesktopServices.openUrl(QUrl(f"https://steamcommunity.com/sharedfiles/filedetails/?id={self.mod.workshop_id}"))
+        else:
+            folder = Path(self.mod.file_path).parent
+            if folder.exists():
+                QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
 
     def mouseDoubleClickEvent(self, event) -> None:
         if event.button() == Qt.LeftButton:
@@ -554,6 +685,84 @@ class AboutDialog(QDialog):
         layout.addWidget(content, 1)
 
 
+class ModDetailsDialog(QDialog):
+    """Frameless, read-only detail view for a single Mod."""
+
+    def __init__(self, mod: Mod, parent=None):
+        super().__init__(parent)
+        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.setModal(True)
+        self.resize(ui(620), ui(560))
+        self.setMinimumSize(ui(500), ui(420))
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        header = DragHeader(self)
+        header.setObjectName("dialogHeader")
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(ui(18), ui(10), ui(12), ui(10))
+        title = QLabel("Mod 详细信息")
+        title.setObjectName("dialogTitle")
+        header_layout.addWidget(title)
+        header_layout.addStretch(1)
+        close = QPushButton("×")
+        close.setObjectName("closeButton")
+        close.setToolTip("关闭")
+        close.clicked.connect(self.accept)
+        header_layout.addWidget(close)
+        root.addWidget(header)
+
+        content = QFrame()
+        content.setObjectName("modDetailsContent")
+        layout = QVBoxLayout(content)
+        layout.setContentsMargins(ui(20), ui(18), ui(20), ui(18))
+        layout.setSpacing(ui(10))
+        name = QLabel(mod.title or mod.file_name)
+        name.setObjectName("modDetailsTitle")
+        name.setWordWrap(True)
+        name.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        layout.addWidget(name)
+
+        code = mod.workshop_id or Path(mod.file_name).stem
+        fields = [
+            ("文件", mod.file_name),
+            ("编号", code),
+            ("作者", mod.author or "未知"),
+            ("订阅", mod.display_subscriptions if mod.subscriptions else "暂无"),
+            ("评分", f"{mod.rating:.1f}" if mod.rating else "暂无"),
+            ("来源", "Steam 创意工坊" if mod.steam_loaded and mod.workshop_id else "本地文件"),
+            ("状态", "已启用" if mod.active else "已禁用"),
+            ("分类", "、".join(mod.categories) if mod.categories else "未分类"),
+            ("文件路径", mod.file_path),
+        ]
+        for label, value in fields:
+            row = QHBoxLayout()
+            row.setSpacing(ui(10))
+            key = QLabel(label)
+            key.setObjectName("modDetailsKey")
+            key.setFixedWidth(ui(62))
+            value_label = QLabel(str(value))
+            value_label.setObjectName("modDetailsValue")
+            value_label.setWordWrap(True)
+            value_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            row.addWidget(key, 0, Qt.AlignTop)
+            row.addWidget(value_label, 1)
+            layout.addLayout(row)
+
+        description_title = QLabel("描述")
+        description_title.setObjectName("modDetailsKey")
+        layout.addWidget(description_title)
+        description = QLabel(mod.description.strip() or "暂无描述")
+        description.setObjectName("modDetailsDescription")
+        description.setWordWrap(True)
+        description.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        layout.addWidget(description)
+        layout.addStretch(1)
+        root.addWidget(content, 1)
+
+
 QtFileDialog = QFileDialog
 
 
@@ -680,6 +889,17 @@ class AppInputBox:
 
 class AppFileDialog:
     @staticmethod
+    def getOpenFileName(parent, _title: str, directory: str = "", filter: str = "") -> tuple[str, str]:
+        dialog = QtFileDialog(parent)
+        dialog.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+        dialog.setOption(QtFileDialog.DontUseNativeDialog, True)
+        dialog.setFileMode(QtFileDialog.ExistingFile)
+        dialog.setNameFilter(filter)
+        dialog.setDirectory(directory)
+        files = dialog.selectedFiles() if dialog.exec_() else []
+        return (files[0], filter) if files else ("", "")
+
+    @staticmethod
     def getExistingDirectory(parent, _title: str, directory: str = "") -> str:
         dialog = QtFileDialog(parent)
         dialog.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
@@ -696,21 +916,93 @@ QInputDialog = AppInputBox
 QFileDialog = AppFileDialog
 
 
+class CollectionItemDelegate(QStyledItemDelegate):
+    """Paint a compact delete affordance on the right side of each collection."""
+
+    delete_width = 34
+
+    def paint(self, painter, option, index):
+        option = QStyleOptionViewItem(option)
+        delete_rect = option.rect.adjusted(option.rect.width() - self.delete_width, 0, 0, 0)
+        super().paint(painter, option, index)
+        painter.save()
+        background = option.palette.highlight().color() if option.state & QStyle.State_Selected else option.palette.base().color()
+        painter.fillRect(delete_rect, background)
+        painter.setPen(QColor("#687384" if index.data(Qt.UserRole) == "default" else "#f1c2c7"))
+        painter.drawText(delete_rect, Qt.AlignCenter, "×")
+        painter.restore()
+
+
 class MultiSelectComboBox(QComboBox):
     """A checkable combo box that keeps its popup open for multi-selection."""
 
     selection_changed = pyqtSignal()
+    collection_delete_requested = pyqtSignal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setEditable(True)
         self.lineEdit().setReadOnly(True)
+        self.lineEdit().setCursor(Qt.PointingHandCursor)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setItemDelegate(CollectionItemDelegate(self))
+        self._popup_open = False
+        self.lineEdit().installEventFilter(self)
         self.view().viewport().installEventFilter(self)
 
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.LeftButton:
+            if self.view().isVisible():
+                self.hidePopup()
+            else:
+                self.showPopup()
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def paintEvent(self, event) -> None:
+        super().paintEvent(event)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setPen(QColor("#9fb2ce"))
+        painter.setFont(QFont("Segoe UI Symbol", max(9, ui(13)), QFont.Bold))
+        painter.translate(0, -ui(1))
+        painter.drawText(self.rect().adjusted(0, 0, -ui(9), 0), Qt.AlignRight | Qt.AlignVCenter, "⌄")
+        painter.end()
+
+    def showPopup(self) -> None:
+        if self.view().isVisible():
+            return
+        self._popup_open = True
+        super().showPopup()
+
+    def hidePopup(self) -> None:
+        if not self.view().isVisible() and not self._popup_open:
+            return
+        self._popup_open = False
+        super().hidePopup()
+
+    def togglePopup(self) -> None:
+        if self._popup_open or self.view().isVisible():
+            self.hidePopup()
+        else:
+            self.showPopup()
+
     def eventFilter(self, source, event) -> bool:
-        if source is self.view().viewport() and event.type() == QEvent.MouseButtonRelease:
+        if source is self.lineEdit() and event.type() == QEvent.MouseButtonPress:
+            if event.button() == Qt.LeftButton:
+                if self.view().isVisible():
+                    self.hidePopup()
+                else:
+                    self.showPopup()
+            return True
+        if source is self.view().viewport() and event.type() == QEvent.MouseButtonPress:
             index = self.view().indexAt(event.pos())
             if index.isValid():
+                item_rect = self.view().visualRect(index)
+                if event.pos().x() >= item_rect.right() - CollectionItemDelegate.delete_width:
+                    self.collection_delete_requested.emit(str(self.itemData(index.row())))
+                    return True
                 state = self.model().data(index, Qt.CheckStateRole)
                 next_state = Qt.Unchecked if state == Qt.Checked else Qt.Checked
                 self.model().setData(index, next_state, Qt.CheckStateRole)
@@ -724,6 +1016,47 @@ class MultiSelectComboBox(QComboBox):
             for index in range(self.count())
             if self.model().data(self.model().index(index, 0), Qt.CheckStateRole) == Qt.Checked
         ]
+
+
+class ToggleSwitch(QWidget):
+    toggled = pyqtSignal(bool)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._checked = False
+        self.setFixedSize(ui(38), ui(20))
+        self.setCursor(Qt.PointingHandCursor)
+
+    def isChecked(self) -> bool:
+        return self._checked
+
+    def setChecked(self, checked: bool) -> None:
+        checked = bool(checked)
+        if checked == self._checked:
+            return
+        self._checked = checked
+        self.update()
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.LeftButton:
+            self._checked = not self._checked
+            self.update()
+            self.toggled.emit(self._checked)
+        event.accept()
+
+    def paintEvent(self, _event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        track = self.rect().adjusted(0, 1, -1, -2)
+        painter.setPen(QColor("#5b8ced" if self._checked else "#4a5d78"))
+        painter.setBrush(QColor("#2d65d6" if self._checked else "#35445a"))
+        painter.drawRoundedRect(track, track.height() / 2, track.height() / 2)
+        knob_diameter = max(1, track.height() - ui(4))
+        knob_x = track.right() - knob_diameter - ui(2) if self._checked else track.left() + ui(2)
+        knob = track.adjusted(knob_x - track.left(), ui(2), knob_x - track.right() + knob_diameter, -ui(2))
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor("#f4f8ff"))
+        painter.drawEllipse(knob)
 
 
 class MainWindow(QMainWindow):
@@ -744,11 +1077,24 @@ class MainWindow(QMainWindow):
         self._ensure_default_collection()
         self._selected_collection_names: set[str] = {"default"}
         self._updating_collection_combo = False
+        self._collection_apply_timer = QTimer(self)
+        self._collection_apply_timer.setSingleShot(True)
+        self._collection_apply_timer.timeout.connect(self._apply_pending_collection_selection)
         self.current_category = "all"
+        self.page_size = 100
+        self.current_page = 0
+        self.category_mode = "simple"
         self.thread_pool = QThreadPool.globalInstance()
         self.steam_sync_in_progress = False
         self._steam_cancel_event = Event()
         self._card_widgets: dict[str, ModCard] = {}
+        self._card_cache: dict[str, ModCard] = {}
+        self._cards_render_token = 0
+        self._cards_ready_for_reflow = False
+        self._mod_sort_cache: dict[str, int] = {}
+        self._card_refresh_pending = False
+        self._content_alignment_pending = False
+        self._content_mode = "mods"
         self._conflict_paths: dict[str, set[str]] = {}
         self._active_path_owners: dict[str, set[str]] = {}
         self._build_ui()
@@ -759,8 +1105,8 @@ class MainWindow(QMainWindow):
         self.refresh_tree()
         self.refresh_cards()
         self.refresh_stats()
-        mod_dir = self.settings.get("mod_dir")
-        if mod_dir and Path(mod_dir).exists() and not self.mods:
+        game_exe = self.settings.get("game_exe")
+        if game_exe and Path(game_exe).exists() and not self.mods:
             self.scan_mods(False)
 
     def _reclassify_loaded_mods(self) -> bool:
@@ -805,7 +1151,7 @@ class MainWindow(QMainWindow):
         self.storage.save_steam_cache(self.steam_cache)
 
     def _build_ui(self) -> None:
-        central = QWidget()
+        central = BackgroundSurface(BACKGROUND_IMAGE)
         central.setObjectName("appSurface")
         root = QVBoxLayout(central)
         root.setContentsMargins(0, 0, 0, 0)
@@ -816,42 +1162,105 @@ class MainWindow(QMainWindow):
         body.setHandleWidth(1)
         sidebar = QWidget()
         sidebar.setObjectName("sidebar")
+        sidebar.setMinimumWidth(ui(230))
         side_layout = QVBoxLayout(sidebar)
         side_layout.setContentsMargins(ui(16), ui(18), ui(12), ui(16))
         side_layout.setSpacing(ui(10))
+        caption_row = QHBoxLayout()
+        caption_row.setContentsMargins(0, 0, 0, 0)
         caption = QLabel("MOD 分类")
         caption.setObjectName("sectionLabel")
-        side_layout.addWidget(caption)
+        caption_row.addWidget(caption)
+        caption_row.addStretch(1)
+        simple_label = QLabel("Steam 分类")
+        simple_label.setObjectName("categorySwitchLabel")
+        caption_row.addWidget(simple_label)
+        self.category_mode_switch = ToggleSwitch()
+        self.category_mode_switch.setObjectName("categoryModeSwitch")
+        self.category_mode_switch.setChecked(False)
+        self.category_mode_switch.toggled.connect(self.on_category_mode_switch_changed)
+        caption_row.addWidget(self.category_mode_switch)
+        side_layout.addLayout(caption_row)
         self.category_tree = QTreeWidget()
         self.category_tree.setHeaderHidden(True)
+        self.category_tree.setIndentation(ui(22))
+        self.category_tree.setUniformRowHeights(True)
         self.category_tree.itemSelectionChanged.connect(self.on_category_selected)
         side_layout.addWidget(self.category_tree, 1)
-        help_text = QLabel("提示：点击卡片或「启用 Mod」即可切换状态。\n右键卡片可加入已保存的组合。")
-        help_text.setObjectName("sideHint")
-        help_text.setWordWrap(True)
-        side_layout.addWidget(help_text)
         body.addWidget(sidebar)
 
         content = QWidget()
         content_layout = QVBoxLayout(content)
-        content_layout.setContentsMargins(ui(22), ui(18), 0, ui(18))
+        # Keep only a slim outer gutter; the toolbar uses the scrollbar width
+        # as an inset so its controls align with the card viewport, not the bar.
+        content_layout.setContentsMargins(ui(22), ui(18), ui(8), ui(18))
         content_layout.setSpacing(ui(14))
         self.content_bar = self._build_content_bar()
-        self.content_bar.setFixedWidth(ui(904))
-        content_layout.addWidget(self.content_bar, 0, Qt.AlignLeft)
+        self.content_bar.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        content_layout.addWidget(self.content_bar)
         self.scroll = QScrollArea()
+        self.scroll.setObjectName("cardsScroll")
         self.scroll.setWidgetResizable(True)
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.scroll.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.scroll.viewport().setObjectName("cardsViewport")
+        self.scroll.verticalScrollBar().rangeChanged.connect(self._schedule_content_alignment)
+        self._cards_loading_overlay = QFrame(self.scroll.viewport())
+        self._cards_loading_overlay.setObjectName("cardsLoadingOverlay")
+        loading_layout = QVBoxLayout(self._cards_loading_overlay)
+        loading_layout.setContentsMargins(0, 0, 0, 0)
+        loading_layout.setSpacing(ui(6))
+        self._cards_loading_spinner = QLabel("◐")
+        self._cards_loading_spinner.setObjectName("cardsLoadingSpinner")
+        self._cards_loading_spinner.setAlignment(Qt.AlignCenter)
+        self._cards_loading_label = QLabel("正在加载 Mod…")
+        self._cards_loading_label.setObjectName("cardsLoadingLabel")
+        self._cards_loading_label.setAlignment(Qt.AlignCenter)
+        loading_layout.addStretch(1)
+        loading_layout.addWidget(self._cards_loading_spinner)
+        loading_layout.addWidget(self._cards_loading_label)
+        loading_layout.addStretch(1)
+        self._cards_loading_frames = ("◐", "◓", "◑", "◒")
+        self._cards_loading_frame = 0
+        self._cards_loading_timer = QTimer(self)
+        self._cards_loading_timer.timeout.connect(self._advance_cards_loading_spinner)
+        self._cards_loading_overlay.hide()
         self.cards_host = QWidget()
         self.cards_host.setObjectName("cardsHost")
         self.cards_layout = QGridLayout(self.cards_host)
         self.cards_layout.setContentsMargins(0, 0, 0, 0)
-        self.cards_layout.setHorizontalSpacing(ui(16))
+        self.cards_layout.setHorizontalSpacing(ui(15))
         self.cards_layout.setVerticalSpacing(ui(16))
         self.cards_layout.setAlignment(Qt.AlignTop | Qt.AlignLeft)
         self.scroll.setWidget(self.cards_host)
         content_layout.addWidget(self.scroll, 1)
+        self.pagination_bar = QWidget()
+        self.pagination_bar.setObjectName("paginationBar")
+        pagination_layout = QHBoxLayout(self.pagination_bar)
+        pagination_layout.setContentsMargins(0, 0, ui(8), 0)
+        pagination_layout.setSpacing(ui(8))
+        self.previous_page_button = QPushButton("上一页")
+        self.previous_page_button.setObjectName("paginationButton")
+        self.previous_page_button.setFixedHeight(ui(20))
+        self.previous_page_button.clicked.connect(lambda: self.change_page(-1))
+        self.page_label = QLabel()
+        self.page_label.setObjectName("pageLabel")
+        self.page_label.setAlignment(Qt.AlignCenter)
+        self.next_page_button = QPushButton("下一页")
+        self.next_page_button.setObjectName("paginationButton")
+        self.next_page_button.setFixedHeight(ui(20))
+        self.next_page_button.clicked.connect(lambda: self.change_page(1))
+        pagination_layout.addWidget(self.previous_page_button)
+        pagination_layout.addWidget(self.page_label)
+        pagination_layout.addWidget(self.next_page_button)
+        pagination_layout.addStretch(1)
+        content_layout.addWidget(self.pagination_bar)
         body.addWidget(content)
         body.setSizes([ui(275), ui(1045)])
+        body.setStretchFactor(0, 0)
+        body.setStretchFactor(1, 1)
+        body.setCollapsible(0, False)
+        body.setCollapsible(1, False)
         root.addWidget(body, 1)
         root.addWidget(self._build_footer())
         self.setCentralWidget(central)
@@ -859,13 +1268,32 @@ class MainWindow(QMainWindow):
     def _build_header(self) -> QWidget:
         header = DragHeader(self)
         header.setObjectName("header")
+        header.setFixedHeight(ui(56))
         layout = QHBoxLayout(header)
-        layout.setContentsMargins(ui(24), ui(14), ui(14), ui(14))
+        layout.setContentsMargins(ui(24), ui(4), ui(8), ui(4))
         layout.setSpacing(ui(10))
         brand = QVBoxLayout()
         brand.setSpacing(0)
         name_row = QHBoxLayout()
         name_row.setSpacing(ui(8))
+        brand_icon = QLabel()
+        brand_icon.setObjectName("brandIcon")
+        brand_icon_size = ui(38)
+        brand_icon.setFixedSize(brand_icon_size, brand_icon_size)
+        brand_icon.setAlignment(Qt.AlignCenter)
+        title_pixmap = QPixmap(str(TITLE_IMAGE))
+        if title_pixmap.isNull():
+            brand_icon.hide()
+        else:
+            # Render at device resolution first so the detailed logo stays sharp
+            # on high-DPI screens while retaining a 40px logical display size.
+            device_ratio = max(1.0, brand_icon.devicePixelRatioF())
+            rendered_size = round(ui(36) * device_ratio)
+            title_pixmap = title_pixmap.scaled(
+                rendered_size, rendered_size, Qt.KeepAspectRatio, Qt.SmoothTransformation,
+            )
+            title_pixmap.setDevicePixelRatio(device_ratio)
+            brand_icon.setPixmap(title_pixmap)
         name = QPushButton("L4D2  BOSS")
         name.setObjectName("brandButton")
         name.setToolTip("查看软件信息")
@@ -874,7 +1302,8 @@ class MainWindow(QMainWindow):
         credit.setObjectName("brandCredit")
         credit.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         credit.setContentsMargins(0, ui(3), 0, 0)
-        name_row.addWidget(name)
+        name_row.addWidget(brand_icon, 0, Qt.AlignVCenter)
+        name_row.addWidget(name, 0, Qt.AlignVCenter)
         name_row.addWidget(credit)
         name_row.addStretch(1)
         sub = QLabel("MOD LOADOUT MANAGER")
@@ -883,19 +1312,31 @@ class MainWindow(QMainWindow):
         brand.addWidget(sub)
         layout.addLayout(brand)
         layout.addStretch(1)
-        self.choose_button = self._header_button(QStyle.SP_DirOpenIcon, "选择目录", self.choose_directory, secondary=True)
-        self.refresh_button = self._header_button(QStyle.SP_BrowserReload, "扫描 Mod", lambda: self.scan_mods(False))
-        self.fetch_button = self._header_button(QStyle.SP_ArrowDown, "同步 Steam", self.fetch_steam_info)
+        self.choose_button = self._header_button(
+            QStyle.SP_DirOpenIcon, "选择游戏", self.choose_directory,
+            secondary=True, icon_only=True, tooltip="选择游戏：定位 left4dead2.exe 并扫描 addons 文件夹",
+        )
+        self.refresh_button = self._header_button(
+            QStyle.SP_BrowserReload, "扫描 Mod", lambda: self.scan_mods(False),
+            icon_only=True, tooltip="扫描 Mod：重新扫描本地 addons 文件夹",
+        )
+        self.fetch_button = self._header_button(
+            QStyle.SP_ArrowDown, "同步 Steam", self.fetch_steam_info,
+            icon_only=True, tooltip="同步 Steam：获取创意工坊 Mod 的名称、订阅数和标签",
+        )
         layout.addWidget(self.choose_button)
         layout.addWidget(self.refresh_button)
         layout.addWidget(self.fetch_button)
-        self.enable_all_button = self._header_button(QStyle.SP_DialogApplyButton, "全部激活", lambda: self.set_all_mods_active(True))
-        self.disable_all_button = self._header_button(QStyle.SP_DialogCancelButton, "全部禁用", lambda: self.set_all_mods_active(False), secondary=True)
-        layout.addWidget(self.enable_all_button)
-        layout.addWidget(self.disable_all_button)
+        self.toggle_all_button = self._header_button(QStyle.SP_DialogApplyButton, "全部启动", self.toggle_all_mods)
+        layout.addWidget(self.toggle_all_button)
         close = QPushButton("×")
         close.setObjectName("closeButton")
         close.setText("×")
+        self.minimize_button = self._window_control_button("−", "最小化", self.showMinimized)
+        self.maximize_button = self._window_control_button("□", "最大化", self.toggle_maximized)
+        layout.addWidget(self.minimize_button)
+        layout.addWidget(self.maximize_button)
+        close.setFixedSize(ui(30), ui(30))
         close.setToolTip("关闭程序")
         close.clicked.connect(self.close)
         layout.addWidget(close)
@@ -904,16 +1345,74 @@ class MainWindow(QMainWindow):
     def show_about(self) -> None:
         AboutDialog(self).exec_()
 
-    def _header_button(self, icon, text, handler, secondary: bool = False) -> QPushButton:
+    def _header_button(
+        self, icon, text, handler, secondary: bool = False, icon_only: bool = False, tooltip: str = "",
+    ) -> QPushButton:
         button = QPushButton(self.style().standardIcon(icon), text)
-        button.setObjectName("headerButtonSecondary" if secondary else "headerButton")
+        if icon_only:
+            button.setText("")
+            button.setObjectName("headerIconButton")
+            button.setFixedSize(ui(40), ui(36))
+            button.setIconSize(QSize(ui(20), ui(20)))
+        else:
+            button.setObjectName("headerButtonSecondary" if secondary else "headerButton")
+        button.setToolTip(tooltip or text)
         button.clicked.connect(handler)
         return button
+
+    @staticmethod
+    def _window_control_button(symbol: str, tooltip: str, handler) -> QPushButton:
+        button = QPushButton(symbol)
+        button.setObjectName("windowControlButton")
+        button.setFixedSize(ui(30), ui(30))
+        button.setToolTip(tooltip)
+        button.clicked.connect(handler)
+        return button
+
+    def toggle_maximized(self) -> None:
+        if self.isMaximized():
+            self.showNormal()
+            self.maximize_button.setText("□")
+            self.maximize_button.setToolTip("最大化")
+        else:
+            self.showMaximized()
+            self.maximize_button.setText("❐")
+            self.maximize_button.setToolTip("还原窗口")
+
+    @staticmethod
+    def _launch_icon() -> QIcon:
+        """An original survivor-inspired mark for the launch action."""
+        size = ui(48)
+        pixmap = QPixmap(size, size)
+        pixmap.fill(Qt.transparent)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setPen(QColor("#ff8b8b"))
+        painter.setBrush(QColor("#b3242f"))
+        painter.drawEllipse(ui(2), ui(2), size - ui(4), size - ui(4))
+        painter.setPen(QColor("#ffffff"))
+        painter.setFont(QFont("Arial", max(7, ui(12)), QFont.Black))
+        painter.drawText(pixmap.rect().adjusted(0, -ui(5), 0, 0), Qt.AlignCenter, "L4D")
+        painter.setFont(QFont("Arial", max(7, ui(15)), QFont.Black))
+        painter.drawText(pixmap.rect().adjusted(0, ui(10), 0, 0), Qt.AlignCenter, "2")
+        painter.end()
+        return QIcon(pixmap)
 
     def _build_content_bar(self) -> QWidget:
         bar = QWidget()
         layout = QHBoxLayout(bar)
-        layout.setContentsMargins(0, 0, 0, 0)
+        # The vertical scrollbar is 8px wide.  Match that inset so the
+        # collection picker ends on the same line as the last card.
+        layout.setContentsMargins(0, 0, ui(8), 0)
+        self.content_back_button = QPushButton()
+        self.content_back_button.setObjectName("contentBackButton")
+        self.content_back_button.setIcon(self.style().standardIcon(QStyle.SP_ArrowBack))
+        self.content_back_button.setIconSize(QSize(ui(18), ui(18)))
+        self.content_back_button.setFixedSize(ui(30), ui(28))
+        self.content_back_button.setToolTip("返回 Mod 列表")
+        self.content_back_button.clicked.connect(self.show_mod_list)
+        self.content_back_button.hide()
+        layout.addWidget(self.content_back_button)
         title_box = QVBoxLayout()
         title_box.setSpacing(1)
         self.content_title = QLabel("全部 Mod")
@@ -928,23 +1427,8 @@ class MainWindow(QMainWindow):
         self.search_input.setObjectName("searchInput")
         self.search_input.setPlaceholderText("搜索名称、作者或 Workshop ID…")
         self.search_input.setClearButtonEnabled(True)
-        self.search_input.textChanged.connect(self.refresh_cards)
+        self.search_input.textChanged.connect(self.on_search_changed)
         layout.addWidget(self.search_input)
-        self.sort_combo = QComboBox()
-        self.sort_combo.setObjectName("sortCombo")
-        self.sort_combo.setMinimumWidth(ui(132))
-        self.sort_combo.view().setObjectName("sortComboMenu")
-        self.sort_combo.addItem("名称 · 正序", ("name", False))
-        self.sort_combo.addItem("名称 · 倒序", ("name", True))
-        self.sort_combo.addItem("时间 · 正序", ("modified", False))
-        self.sort_combo.addItem("时间 · 倒序", ("modified", True))
-        saved_sort = (self.settings.get("sort_field", "name"), bool(self.settings.get("sort_descending", False)))
-        for index in range(self.sort_combo.count()):
-            if self.sort_combo.itemData(index) == saved_sort:
-                self.sort_combo.setCurrentIndex(index)
-                break
-        self.sort_combo.currentIndexChanged.connect(self.on_sort_changed)
-        layout.addWidget(self.sort_combo)
         self.collection_combo = MultiSelectComboBox()
         self.collection_combo.setObjectName("collectionCombo")
         self.collection_combo.setMinimumWidth(ui(210))
@@ -953,12 +1437,8 @@ class MainWindow(QMainWindow):
         self.collection_combo.view().setTextElideMode(Qt.ElideRight)
         self.collection_combo.view().setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.collection_combo.selection_changed.connect(self.on_collection_selection_changed)
+        self.collection_combo.collection_delete_requested.connect(self.delete_collection)
         layout.addWidget(self.collection_combo)
-        self.delete_collection_button = QPushButton("删除")
-        self.delete_collection_button.setObjectName("collectionDeleteButton")
-        self.delete_collection_button.setToolTip("删除当前勾选的组合（default 组合不可删除）")
-        self.delete_collection_button.clicked.connect(self.delete_selected_collections)
-        layout.addWidget(self.delete_collection_button)
         return bar
 
     def _build_footer_legacy(self) -> QWidget:
@@ -978,15 +1458,15 @@ class MainWindow(QMainWindow):
         self.save_button.setObjectName("primaryButton")
         self.save_button.clicked.connect(self.save_collection)
         layout.addWidget(self.save_button)
-        layout.insertWidget(layout.indexOf(self.save_button), self.enable_all_button)
-        layout.insertWidget(layout.indexOf(self.save_button), self.disable_all_button)
+        layout.insertWidget(layout.indexOf(self.save_button), self.toggle_all_button)
         return footer
 
     def _build_footer(self) -> QWidget:
         footer = QFrame()
         footer.setObjectName("footer")
+        footer.setFixedHeight(ui(56))
         layout = QHBoxLayout(footer)
-        layout.setContentsMargins(0, ui(10), 0, ui(10))
+        layout.setContentsMargins(0, ui(4), 0, ui(4))
         layout.setSpacing(0)
 
         status_host = QWidget()
@@ -1004,8 +1484,9 @@ class MainWindow(QMainWindow):
         status_layout.addStretch(1)
         layout.addWidget(status_host)
 
-        action_host = QWidget()
-        action_host.setFixedWidth(ui(904))
+        self.action_host = QWidget()
+        self.action_host.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        action_host = self.action_host
         action_layout = QHBoxLayout(action_host)
         action_layout.setContentsMargins(0, 0, 0, 0)
         action_layout.setSpacing(ui(10))
@@ -1026,22 +1507,26 @@ class MainWindow(QMainWindow):
         self.steam_sync_widget.hide()
         action_layout.addWidget(self.steam_sync_widget)
         action_layout.addStretch(1)
-        action_layout.addWidget(self.enable_all_button)
-        action_layout.addWidget(self.disable_all_button)
+        action_layout.addWidget(self.toggle_all_button)
         self.save_button = QPushButton("保存当前组合")
         self.save_button.setObjectName("primaryButton")
         self.save_button.clicked.connect(self.save_collection)
         action_layout.addWidget(self.save_button)
-        layout.addWidget(action_host)
-        layout.addStretch(1)
+        self.launch_button = QPushButton("  启动游戏")
+        self.launch_button.setObjectName("launchButton")
+        self.launch_button.setIcon(self._launch_icon())
+        self.launch_button.setIconSize(QSize(ui(20), ui(20)))
+        self.launch_button.clicked.connect(self.launch_game)
+        action_layout.addWidget(self.launch_button)
+        layout.addWidget(action_host, 1)
         return footer
 
     def _apply_style(self) -> None:
         self.setStyleSheet("""
             QWidget { font-family: "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei"; }
             QMainWindow, QDialog { background: transparent; color: #e8edf5; }
-            #appSurface { background: #10141c; border-radius: 14px; }
-            #header { background: #171d29; border-bottom: 1px solid #2a3444; border-top-left-radius: 14px; border-top-right-radius: 14px; }
+            #appSurface { background: transparent; border-radius: 14px; }
+            #header { background: rgba(23, 29, 41, 210); border-bottom: 1px solid #2a3444; border-top-left-radius: 14px; border-top-right-radius: 14px; }
             #brand { color: #f4f8ff; font-size: 20px; font-weight: 800; letter-spacing: 2px; }
             #brandButton { color: #f4f8ff; background: transparent; border: 0; padding: 0; font-size: 20px; font-weight: 800; letter-spacing: 2px; text-align: left; }
             #brandButton:hover { color: #79a5ff; }
@@ -1049,16 +1534,27 @@ class MainWindow(QMainWindow):
             #brandSub, #contentSubtitle { color: #8090a8; font-size: 10px; font-weight: 700; letter-spacing: 1px; }
             #headerButton, #headerButtonSecondary { background: #273347; color: #d9e4f4; border: 1px solid #38465c; border-radius: 7px; padding: 8px 13px; font-weight: 700; }
             #headerButton:hover, #headerButtonSecondary:hover { background: #33435c; color: white; }
+            #headerIconButton { background: #202c40; border: 0; border-radius: 7px; padding: 0; }
+            #headerIconButton:hover { background: #2d65d6; border: 0; }
+            QToolTip { color: #eaf2ff; background: #202b3b; border: 1px solid #40516a; border-radius: 5px; padding: 5px 8px; }
             #primaryButton { background: #2d65d6; color: white; border: 0; border-radius: 7px; padding: 8px 13px; font-weight: 700; }
             #primaryButton:hover { background: #3c78ee; }
-            #sidebar { background: #151b26; border-right: 1px solid #283242; }
+            #launchButton { background: #16845b; color: white; border: 0; border-radius: 7px; padding: 8px 13px; font-weight: 700; }
+            #launchButton:hover { background: #20a873; }
+            #launchButton:disabled { color: #8b9aab; background: #293544; }
+            #sidebar { background: rgba(21, 27, 38, 205); border-right: 1px solid #283242; }
             #sectionLabel { color: #94a4bc; font-size: 11px; font-weight: 800; letter-spacing: 1px; }
+            #categorySwitchLabel { color: #91a0b4; font-size: 11px; font-weight: 700; }
             #sideHint { color: #718097; font-size: 11px; line-height: 1.45; padding: 10px; background: #1c2533; border-radius: 7px; }
             QTreeWidget { background: transparent; border: 0; color: #b8c4d5; outline: none; font-size: 13px; }
-            QTreeWidget::item { min-height: 29px; border-radius: 6px; padding: 3px 5px; }
+            QTreeWidget::item { min-height: 29px; border-radius: 6px; padding: 4px 6px; }
             QTreeWidget::item:hover { background: #212b3a; color: #f2f6fc; }
             QTreeWidget::item:selected { background: #2b5fca; color: white; font-weight: 700; }
-            QScrollArea { border: 0; background: #10141c; }
+            QScrollArea { border: 0; background: transparent; }
+            #cardsScroll, #cardsViewport, #cardsHost { background: transparent; }
+            #cardsLoadingOverlay { background: transparent; }
+            #cardsLoadingSpinner { color: #78a8ff; font-size: 30px; font-weight: 700; }
+            #cardsLoadingLabel { color: #c4d5ee; font-size: 13px; font-weight: 700; }
             QScrollBar:vertical { background: #10151e; width: 8px; margin: 5px 0 5px 0; border-radius: 4px; }
             QScrollBar::handle:vertical { background: #273242; min-height: 42px; border-radius: 4px; }
             QScrollBar::handle:vertical:hover { background: #3a4a60; }
@@ -1069,55 +1565,76 @@ class MainWindow(QMainWindow):
             QScrollBar::handle:horizontal:hover { background: #3a4a60; }
             QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; }
             QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal { background: transparent; }
-            #cardsHost { background: #10141c; }
             #contentTitle { color: #f1f5fb; font-size: 22px; font-weight: 800; }
             QLineEdit, QComboBox { min-height: 32px; background: #19212e; color: #e6edf7; border: 1px solid #2c384a; border-radius: 7px; padding: 0 11px; }
             QLineEdit:focus, QComboBox:focus { border-color: #5486ec; background: #1b2534; }
             #searchInput { min-width: 235px; }
-            #collectionCombo, #sortCombo { padding-left: 12px; padding-right: 30px; font-weight: 600; }
+            #collectionCombo { padding-left: 12px; padding-right: 30px; font-weight: 600; }
             #collectionCombo QLineEdit { background: transparent; border: 0; padding: 0; color: #e6edf7; font-weight: 600; }
-            #collectionCombo:hover, #sortCombo:hover { background: #202b3c; border-color: #3b506e; }
-            #collectionCombo::drop-down, #sortCombo::drop-down { subcontrol-origin: padding; subcontrol-position: top right; border: 0; width: 30px; }
-            #collectionComboMenu, #sortComboMenu { background: #18212e; color: #dfe9f8; border: 1px solid #3a4a61; border-radius: 8px; outline: 0; padding: 5px; selection-background-color: transparent; }
-            #collectionComboMenu::item, #sortComboMenu::item { min-height: 40px; border: 1px solid transparent; border-radius: 6px; padding: 0 12px; margin: 3px 0; }
-            #collectionComboMenu::item:hover, #sortComboMenu::item:hover { background: #25344a; border-color: #3a5272; color: #ffffff; }
-            #collectionComboMenu::item:selected, #sortComboMenu::item:selected { background: #2d65d6; border-color: #4d83eb; color: #ffffff; font-weight: 700; }
-            #collectionComboMenu QScrollBar:vertical, #sortComboMenu QScrollBar:vertical { background: transparent; width: 7px; margin: 7px 3px 7px 0; }
-            #collectionComboMenu QScrollBar::handle:vertical, #sortComboMenu QScrollBar::handle:vertical { background: #3a4b63; min-height: 30px; border-radius: 3px; }
-            #collectionComboMenu QScrollBar::handle:vertical:hover, #sortComboMenu QScrollBar::handle:vertical:hover { background: #50709a; }
-            #collectionDeleteButton { min-height: 32px; color: #f1c2c7; background: #30212a; border: 1px solid #5c3743; border-radius: 7px; padding: 0 11px; font-weight: 700; }
-            #collectionDeleteButton:hover { color: #ffffff; background: #923946; border-color: #dc6170; }
-            #collectionDeleteButton:disabled { color: #687384; background: #1b222d; border-color: #2d3747; }
+            #collectionCombo:hover { background: #202b3c; border-color: #3b506e; }
+            #collectionCombo::drop-down { subcontrol-origin: padding; subcontrol-position: top right; border: 0; width: 30px; }
+            #collectionComboMenu { background: #18212e; color: #dfe9f8; border: 1px solid #3a4a61; border-radius: 8px; outline: 0; padding: 5px; selection-background-color: transparent; }
+            #collectionComboMenu::item { min-height: 40px; border: 1px solid transparent; border-radius: 6px; padding: 0 12px; margin: 3px 0; }
+            #collectionComboMenu::item:hover { background: #25344a; border-color: #3a5272; color: #ffffff; }
+            #collectionComboMenu::item:selected { background: #2d65d6; border-color: #4d83eb; color: #ffffff; font-weight: 700; }
+            #collectionComboMenu QScrollBar:vertical { background: transparent; width: 7px; margin: 7px 3px 7px 0; }
+            #collectionComboMenu QScrollBar::handle:vertical { background: #3a4b63; min-height: 30px; border-radius: 3px; }
+            #collectionComboMenu QScrollBar::handle:vertical:hover { background: #50709a; }
             #modCard, #modCardActive, #modCardConflict { background: #18202c; border: 1px solid #293649; border-radius: 10px; }
             #modCard:hover { background: #1c2634; border-color: #4c6890; }
             #modCardActive { border: 2px solid #23c987; background: #12362e; }
             #modCardActive:hover { background: #174538; border-color: #55efad; }
             #modCardConflict { border: 2px solid #f04455; background: #481923; }
             #modCardConflict:hover { background: #5a1d29; border-color: #ff7885; }
-            #preview { background: #111821; border-radius: 7px; min-height: 112px; max-height: 112px; }
-            #cardTitle { color: #f2f6fc; font-size: 14px; font-weight: 700; }
-            #cardMeta { color: #91a0b4; font-size: 11px; }
-            #tag { color: #ffffff; border-radius: 4px; padding: 3px 6px; font-size: 10px; font-weight: 700; }
-            #cardAction, #cardActionActive { min-height: 28px; border-radius: 6px; font-weight: 700; }
+            #preview { background: #111821; border-radius: 7px; min-height: 76px; max-height: 76px; }
+            #cardTitle { color: #f2f6fc; font-size: 13px; font-weight: 700; }
+            #cardMeta { color: #91a0b4; font-size: 10px; }
+            #typeSummary { color: #91a0b4; font-size: 9px; font-weight: 600; padding: 0; }
+            #tag, #tagButton { min-height: 20px; max-height: 20px; color: #ffffff; border-radius: 4px; padding: 0 6px; font-size: 9px; font-weight: 700; }
+            #cardAction, #cardActionActive { min-height: 24px; max-height: 24px; border-radius: 6px; font-size: 11px; font-weight: 700; }
             #cardAction { color: #cbd7e8; background: #253247; border: 1px solid #34445c; }
             #cardAction:hover { color: white; background: #2d65d6; border-color: #2d65d6; }
             #cardActionActive { color: #d2ffeb; background: #167453; border: 1px solid #2be39a; }
             #cardActionActive:hover { color: white; background: #b84752; border-color: #b84752; }
-            #tagButton { min-height: 20px; color: #ffffff; border: 0; border-radius: 4px; padding: 1px 6px; font-size: 10px; font-weight: 700; }
+            #tagButton { border: 0; }
             #tagButton:hover { border: 1px solid #d8e7ff; padding: 0 5px; }
             #emptyText { color: #9db2d0; background: transparent; border: 0; padding: 0; font-size: 15px; font-weight: 500; line-height: 1.7; letter-spacing: 0.5px; }
+            #paginationBar { min-height: 26px; }
+            #paginationButton { min-height: 0; max-height: 22px; color: #cbd7e8; background: #253247; border: 1px solid #34445c; border-radius: 5px; padding: 0 9px; font-size: 11px; }
+            #paginationButton:hover { color: white; background: #2d65d6; border-color: #2d65d6; }
+            #paginationButton:disabled { color: #687384; background: #1b222d; border-color: #2d3747; }
+            #pageLabel { color: #91a0b4; min-width: 64px; font-size: 11px; qproperty-alignment: AlignCenter; }
             #steamSyncStatus { background: #1b2a3d; border: 1px solid #355577; border-radius: 7px; }
             #steamSyncLabel { color: #bcd7ff; font-size: 11px; font-weight: 700; }
             #steamSyncProgress { min-height: 6px; max-height: 6px; border: 0; border-radius: 3px; background: #263a54; }
             #steamSyncProgress::chunk { border-radius: 3px; background: #4c86eb; }
-            #footer { background: #151b26; border-top: 1px solid #283242; border-bottom-left-radius: 14px; border-bottom-right-radius: 14px; }
+            #footer { background: rgba(21, 27, 38, 205); border-top: 1px solid #283242; border-bottom-left-radius: 14px; border-bottom-right-radius: 14px; }
             #footer QLabel { color: #9eacc0; padding-right: 12px; }
             #conflictButton { color: #ffabab; background: transparent; border: 0; font-weight: 700; }
             #conflictButton:disabled { color: #718097; }
-            #closeButton { min-width: 16px; max-width: 16px; min-height: 16px; max-height: 16px; padding: 0; border: 0; color: #92a1b6; background: transparent; font-size: 13px; font-weight: 800; }
+            #closeButton { min-width: 30px; max-width: 30px; min-height: 30px; max-height: 30px; padding: 0; border: 0; color: #92a1b6; background: transparent; font-size: 18px; font-weight: 800; }
             #closeButton:hover { color: #ff7a85; background: transparent; }
+            #windowControlButton { padding: 0; border: 0; color: #92a1b6; background: transparent; font-size: 16px; font-weight: 700; }
+            #windowControlButton:hover { color: #f3f7ff; background: #29364a; border-radius: 5px; }
             #dialogHeader { background: #1b2432; border-bottom: 1px solid #2d3a4d; border-top-left-radius: 14px; border-top-right-radius: 14px; }
             #dialogTitle { color: #f1f5fb; font-size: 17px; font-weight: 800; }
+            #modDetailsContent { background: #151d29; border-bottom-left-radius: 14px; border-bottom-right-radius: 14px; }
+            #modDetailsTitle { color: #f4f8ff; font-size: 16px; font-weight: 800; }
+            #modDetailsKey { color: #8ca4c6; font-size: 11px; font-weight: 700; }
+            #modDetailsValue { color: #e2ebf8; font-size: 11px; }
+            #modDetailsDescription { color: #b9c7d9; background: #111822; border: 1px solid #29384d; border-radius: 7px; padding: 9px; font-size: 11px; }
+            #contentBackButton { color: #aebfd6; background: transparent; border: 0; padding: 0; }
+            #contentBackButton:hover { color: #ffffff; background: rgba(73, 103, 145, 120); border-radius: 5px; }
+            #mainDetailsHost, #mainConflictHost { background: transparent; }
+            #mainDetailsPreview { background: #111821; border: 1px solid #29384d; border-radius: 9px; }
+            #mainDetailsTitle { color: #f3f7fd; font-size: 18px; font-weight: 800; }
+            #mainDetailsField { color: #b6c6da; font-size: 12px; padding: 2px 0; }
+            #mainDetailsDescription { color: #cad6e7; background: rgba(17, 24, 34, 220); border: 1px solid #29384d; border-radius: 8px; padding: 12px; font-size: 12px; line-height: 1.55; }
+            #steamDetailsLink { min-height: 28px; color: #dceaff; background: #285b9d; border: 1px solid #4b82c8; border-radius: 6px; padding: 0 10px; font-size: 11px; font-weight: 700; }
+            #steamDetailsLink:hover { background: #3470bc; color: white; }
+            #mainConflictGroup { background: rgba(28, 31, 43, 235); border: 1px solid #a54c5a; border-radius: 10px; }
+            #mainConflictGroupTitle { color: #ffc0c7; font-size: 12px; font-weight: 800; }
+            #mainConflictGroupReason { color: #d4e1f3; background: #202c3d; border: 1px solid #3e506a; border-radius: 5px; padding: 5px 7px; font-size: 10px; }
             #dialogSubtitle { color: #8596af; font-size: 11px; }
             #aboutContent { background: #121924; border-bottom-left-radius: 14px; border-bottom-right-radius: 14px; }
             #aboutBrand { color: #f1f5fb; font-size: 25px; font-weight: 800; letter-spacing: 2px; }
@@ -1136,6 +1653,7 @@ class MainWindow(QMainWindow):
             #conflictCountBadge { color: #fff4f5; background: #b84752; border: 1px solid #ef7d87; border-radius: 12px; font-size: 11px; font-weight: 800; }
             #conflictPreview { background: #111821; border-radius: 7px; min-height: 104px; max-height: 104px; }
             #conflictCaption { color: #f08b96; font-size: 11px; font-weight: 700; }
+            #conflictMeta { color: #aebbd0; font-size: 9px; }
             #conflictPeers { color: #abb8c9; font-size: 11px; }
             #conflictPeerButton { max-height: 28px; color: #ffd3d7; background: #3c2730; border: 1px solid #754551; border-radius: 6px; padding: 0 9px; font-size: 11px; font-weight: 700; }
             #conflictPeerButton:hover { color: white; background: #c94a54; border-color: #e26770; }
@@ -1232,26 +1750,65 @@ class MainWindow(QMainWindow):
 
     def refresh_tree(self) -> None:
         self.category_tree.clear()
-        for category in CATEGORIES:
-            self.category_tree.addTopLevelItem(self._make_tree_item(category))
+        categories = SIMPLE_CATEGORIES if self.category_mode == "simple" else CATEGORIES
+        for category in categories:
+            self.category_tree.addTopLevelItem(self._make_tree_item(category, 0))
         self.category_tree.expandAll()
         self.category_tree.setCurrentItem(self.category_tree.topLevelItem(0))
 
-    def _make_tree_item(self, entry) -> QTreeWidgetItem:
+    def _make_tree_item(self, entry, depth: int) -> QTreeWidgetItem:
         if isinstance(entry, tuple):
             item = QTreeWidgetItem([entry[1]])
             item.setData(0, Qt.UserRole, entry[0])
+            item.setData(0, Qt.UserRole + 1, depth)
+            child_font = QFont(self.category_tree.font())
+            child_font.setPointSize(max(9, child_font.pointSize() - (1 if depth > 1 else 0)))
+            item.setFont(0, child_font)
+            item.setForeground(0, QColor("#aab8cc" if depth == 1 else "#899ab2"))
             return item
         item = QTreeWidgetItem([entry["label"]])
         item.setData(0, Qt.UserRole, entry["id"])
+        item.setData(0, Qt.UserRole + 1, depth)
+        root_font = QFont(self.category_tree.font())
+        root_font.setBold(depth == 0 or (self.category_mode == "simple" and depth == 1))
+        root_font.setPointSize(max(10, root_font.pointSize() + (1 if depth == 0 else 0)))
+        item.setFont(0, root_font)
+        item.setForeground(0, QColor("#edf3fc" if depth == 0 else "#aab8cc"))
         for child in entry.get("children", []):
-            item.addChild(self._make_tree_item(child))
+            item.addChild(self._make_tree_item(child, depth + 1))
         return item
 
+    def on_category_mode_switch_changed(self, checked: bool) -> None:
+        self.category_mode = "steam" if checked else "simple"
+        self.current_category = "all"
+        self.category_tree.blockSignals(True)
+        self.refresh_tree()
+        self.category_tree.blockSignals(False)
+        self.current_page = 0
+        if self._content_mode == "mods":
+            self.refresh_cards()
+
     def refresh_cards(self) -> None:
-        clear_layout(self.cards_layout)
+        self._content_mode = "mods"
+        self._cards_render_token += 1
+        self._cards_ready_for_reflow = False
+        self._show_cards_loading()
+        self.content_back_button.hide()
+        self.search_input.show()
+        self.collection_combo.show()
+        # Detach and hide existing cards instead of destroying them. Reusing
+        # cards removes the noticeable pause when switching category filters.
+        while self.cards_layout.count():
+            item = self.cards_layout.takeAt(0)
+            if item.widget() is not None:
+                item.widget().hide()
         self._card_widgets = {}
         filtered = self.filtered_mods()
+        total_pages = max(1, (len(filtered) + self.page_size - 1) // self.page_size)
+        self.current_page = min(self.current_page, total_pages - 1)
+        self._update_pagination(len(filtered), total_pages)
+        page_start = self.current_page * self.page_size
+        page_mods = filtered[page_start:page_start + self.page_size]
         self.content_subtitle.setText(f"显示 {len(filtered)} 个 Mod  ·  点击卡片即可快速启用或禁用")
         if not filtered:
             columns = self.card_columns()
@@ -1265,46 +1822,371 @@ class MainWindow(QMainWindow):
             empty_layout = QVBoxLayout(empty_host)
             empty_layout.setContentsMargins(0, 0, 0, 0)
             empty_layout.addStretch(1)
-            empty = QLabel("没有找到匹配的 Mod\n调整搜索条件，或点击「选择目录」导入 VPK 文件。")
+            empty = QLabel("没有找到匹配的 Mod\n调整搜索条件，或点击「选择游戏」扫描 addons 文件夹。")
             empty.setObjectName("emptyText")
             empty.setAlignment(Qt.AlignCenter)
             empty_layout.addWidget(empty, 0, Qt.AlignHCenter)
             empty_layout.addStretch(1)
             self.cards_layout.addWidget(empty_host, 0, 0, 1, columns)
+            self._hide_cards_loading()
             return
         self.cards_layout.setAlignment(Qt.AlignTop | Qt.AlignLeft)
         self.cards_layout.setRowStretch(0, 0)
         columns = self.card_columns()
+        card_width = self.card_width(columns)
         for column in range(max(columns, self.cards_layout.columnCount())):
+            self.cards_layout.setColumnMinimumWidth(column, 0)
             self.cards_layout.setColumnStretch(column, 0)
-        for index, mod in enumerate(filtered):
-            card = ModCard(mod, self.collection_names_for(mod.id))
-            card.clicked.connect(self.toggle_mod)
-            card.context_requested.connect(self.show_card_context_menu)
+        token = self._cards_render_token
+        QTimer.singleShot(0, lambda: self._populate_cards_batch(
+            page_mods, columns, card_width, token, 0,
+        ))
+
+    def _populate_cards_batch(
+        self, page_mods: list[Mod], columns: int, card_width: int, token: int, start: int,
+    ) -> None:
+        if token != self._cards_render_token or self._content_mode != "mods":
+            return
+        current_columns = self.card_columns()
+        if current_columns != columns:
+            # The viewport can settle to its final width after the first batch.
+            # Restart the current page so every row uses one consistent column count.
+            self.refresh_cards()
+            return
+        # A complete page is laid out in one pass. This prevents the initial
+        # load from looking like cards are sliding into place row by row.
+        batch_size = len(page_mods)
+        for index, mod in enumerate(page_mods[start:start + batch_size], start=start):
+            card = self._card_cache.get(mod.id)
+            if card is None:
+                card = ModCard(mod, self.collection_names_for(mod.id), card_width)
+                card.clicked.connect(self.toggle_mod)
+                card.context_requested.connect(self.show_card_context_menu)
+                self._card_cache[mod.id] = card
+            else:
+                card.mod = mod
+                card.refresh_state()
+                card.setFixedWidth(card_width)
             self._card_widgets[mod.id] = card
             self.cards_layout.addWidget(card, index // columns, index % columns, Qt.AlignTop)
+            # Reparent through the layout first; showing it earlier would make
+            # a parentless card appear as a separate native window.
+            card.show()
+        next_start = start + batch_size
+        if next_start < len(page_mods):
+            QTimer.singleShot(0, lambda: self._populate_cards_batch(
+                page_mods, columns, card_width, token, next_start,
+            ))
+            return
+        # Normalize the final grid after all cards are present. This prevents
+        # a late viewport resize from leaving mixed 3/4-column rows.
+        self._reflow_cards()
+        self._cards_ready_for_reflow = True
+        self._hide_cards_loading()
         for column in range(columns):
-            self.cards_layout.setColumnMinimumWidth(column, ui(214))
+            self.cards_layout.setColumnMinimumWidth(column, 0)
+        self._sync_content_right_edges()
+
+    def _update_pagination(self, total: int, total_pages: int) -> None:
+        visible = total_pages > 1
+        self.pagination_bar.setVisible(visible)
+        if not visible:
+            return
+        self.page_label.setText(f"第 {self.current_page + 1} / {total_pages} 页")
+        self.previous_page_button.setEnabled(self.current_page > 0)
+        self.next_page_button.setEnabled(self.current_page < total_pages - 1)
+
+    def change_page(self, offset: int) -> None:
+        self.current_page = max(0, self.current_page + offset)
+        self.refresh_cards()
+
+    def on_search_changed(self) -> None:
+        self.current_page = 0
+        self.refresh_cards()
 
     def card_columns(self) -> int:
-        width = self.scroll.viewport().width() if hasattr(self, "scroll") else 900
-        return max(1, width // ui(225))
+        width = self._card_viewport_width()
+        spacing = ui(15)
+        # Four compact cards should fit in the default window.  Cards expand to
+        # use any extra room, so the final column never leaves a large dead area.
+        return max(1, (width + spacing) // (ui(200) + spacing))
+
+    def card_width(self, columns: int) -> int:
+        width = self._card_viewport_width()
+        return max(ui(160), (width - ui(15) * (columns - 1)) // columns)
+
+    def _card_viewport_width(self) -> int:
+        if not hasattr(self, "scroll"):
+            return ui(900)
+        viewport = self.scroll.viewport()
+        scrollbar = self.scroll.verticalScrollBar()
+        # Before the grid has enough rows, the vertical bar has not appeared
+        # yet. Reserve its width now so the final rightmost card never shifts
+        # beneath it once the bar is shown.
+        reserved_scrollbar = 0 if scrollbar.isVisible() else scrollbar.sizeHint().width()
+        return max(ui(1), viewport.width() - reserved_scrollbar)
+
+    def _show_cards_loading(self) -> None:
+        if not hasattr(self, "_cards_loading_overlay"):
+            return
+        self._cards_loading_overlay.setGeometry(self.scroll.viewport().rect())
+        self._cards_loading_overlay.raise_()
+        self._cards_loading_overlay.show()
+        self._cards_loading_timer.start(120)
+
+    def _hide_cards_loading(self) -> None:
+        self._cards_loading_timer.stop()
+        self._cards_loading_overlay.hide()
+
+    def _advance_cards_loading_spinner(self) -> None:
+        self._cards_loading_frame = (self._cards_loading_frame + 1) % len(self._cards_loading_frames)
+        self._cards_loading_spinner.setText(self._cards_loading_frames[self._cards_loading_frame])
+
+    def _schedule_cards_refresh(self, *_args) -> None:
+        """Coalesce resize events before reflowing visible cards."""
+        if (
+            self._card_refresh_pending
+            or not self._cards_ready_for_reflow
+            or not hasattr(self, "cards_layout")
+        ):
+            return
+        self._card_refresh_pending = True
+        QTimer.singleShot(120, self._refresh_cards_after_layout)
+
+    def _refresh_cards_after_layout(self) -> None:
+        self._card_refresh_pending = False
+        self._reflow_cards()
+        self._sync_content_right_edges()
+
+    def _reflow_cards(self) -> None:
+        """Reposition existing cards after a resize without rebuilding previews."""
+        if not self._card_widgets:
+            return
+        columns = self.card_columns()
+        card_width = self.card_width(columns)
+        card_width = self.card_width(columns)
+        existing_columns = max(columns, self.cards_layout.columnCount())
+        for column in range(existing_columns):
+            self.cards_layout.setColumnMinimumWidth(column, card_width if column < columns else 0)
+            self.cards_layout.setColumnStretch(column, 0)
+        for index, card in enumerate(self._card_widgets.values()):
+            self.cards_layout.removeWidget(card)
+            card.setFixedWidth(card_width)
+            self.cards_layout.addWidget(card, index // columns, index % columns, Qt.AlignTop)
+
+    def _sync_content_right_edges(self) -> None:
+        """Make controls end exactly where the visible card viewport ends."""
+        self._content_alignment_pending = False
+        if not hasattr(self, "scroll"):
+            return
+        scrollbar = self.scroll.verticalScrollBar()
+        inset = scrollbar.width() if scrollbar.isVisible() else 0
+        self.content_bar.layout().setContentsMargins(0, 0, inset, 0)
+        self.pagination_bar.layout().setContentsMargins(0, 0, inset, 0)
+        if hasattr(self, "action_host"):
+            # The footer starts after the fixed sidebar.  Mirror the content
+            # area's outer gutter and scrollbar inset for a shared right edge.
+            # The footer itself extends to the app edge, so include that outer
+            # gutter as well when aligning its final action to the viewport.
+            self.action_host.layout().setContentsMargins(ui(22), 0, ui(8) + inset, 0)
+
+    def _schedule_content_alignment(self, *_args) -> None:
+        if self._content_alignment_pending or not hasattr(self, "scroll"):
+            return
+        self._content_alignment_pending = True
+        QTimer.singleShot(0, self._sync_content_right_edges)
 
     def collection_names_for(self, mod_id: str) -> list[str]:
         return [item.name for item in self.collections if mod_id in item.mod_ids]
 
     def show_card_context_menu(self, mod_id: str, global_pos) -> None:
         menu = QMenu(self)
+        mod = self.mods.get(mod_id)
+        if mod is None:
+            return
+        source_action = menu.addAction("查看源文件")
+        source_action.setToolTip("打开该 Mod 所在文件夹")
+        source_action.triggered.connect(lambda: self.open_mod_source(mod))
+        details_action = menu.addAction("查看详细信息")
+        details_action.triggered.connect(lambda: self.show_mod_details(mod))
+        delete_action = menu.addAction("删除 Mod")
+        delete_action.setToolTip("删除该 Mod 文件及其关联预览图片")
+        delete_action.triggered.connect(lambda: self.delete_mod(mod_id))
+        menu.addSeparator()
         add_menu = menu.addMenu("加入已保存的组合")
         existing = set(self.collection_names_for(mod_id))
         if not self.collections:
             action = add_menu.addAction("暂无组合，请先保存当前组合")
             action.setEnabled(False)
         for collection in self.collections:
-            action = add_menu.addAction(collection.name)
-            action.setEnabled(collection.name not in existing)
-            action.triggered.connect(lambda _=False, name=collection.name: self.add_mod_to_collection(mod_id, name))
+            if collection.name in existing:
+                existing_action = QWidgetAction(add_menu)
+                existing_label = QLabel(
+                    f'<span style="color:#dfe9f8;">{escape(collection.name)}</span>'
+                    ' <span style="color:#ff6f7d; font-weight:700;">· 已存在</span>'
+                )
+                existing_label.setFixedHeight(ui(35))
+                existing_label.setContentsMargins(ui(11), 0, ui(16), 0)
+                existing_action.setDefaultWidget(existing_label)
+                add_menu.addAction(existing_action)
+            else:
+                action = add_menu.addAction(collection.name)
+                action.triggered.connect(lambda _=False, name=collection.name: self.add_mod_to_collection(mod_id, name))
         menu.exec_(global_pos)
+
+    @staticmethod
+    def open_mod_source(mod: Mod) -> None:
+        file_path = Path(mod.file_path)
+        if file_path.is_file():
+            subprocess.Popen(["explorer.exe", "/select,", str(file_path)])
+        else:
+            QMessageBox.warning(None, "文件不存在", f"找不到 Mod 文件：\n{file_path}")
+
+    def delete_mod(self, mod_id: str) -> None:
+        """Remove only the selected Mod file and its recorded preview image."""
+        mod = self.mods.get(mod_id)
+        if mod is None:
+            return
+        targets = [Path(mod.file_path)]
+        if mod.image_path:
+            image_path = Path(mod.image_path)
+            if image_path not in targets:
+                targets.append(image_path)
+        existing = [path for path in targets if path.is_file()]
+        names = "\n".join(f"• {path.name}" for path in existing) or "• 未找到本地文件"
+        message = f"确定删除以下 Mod 文件吗？\n\n{names}\n\n此操作无法恢复。"
+        if QMessageBox.question(self, "删除 Mod", message) != QMessageBox.Yes:
+            return
+        failed: list[str] = []
+        for path in existing:
+            try:
+                path.unlink()
+                PREVIEW_CACHE.pop((str(path), ui(186), ui(76)), None)
+            except OSError as exc:
+                failed.append(f"{path.name}：{exc}")
+        if failed:
+            QMessageBox.critical(self, "删除失败", "\n".join(failed))
+            return
+        self.mods.pop(mod_id, None)
+        for collection in self.collections:
+            if mod_id in collection.mod_ids:
+                collection.mod_ids.remove(mod_id)
+        self.steam_cache.pop(mod.workshop_id or "", None)
+        self.storage.save_mods(self.mods)
+        self.storage.save_collections(self.collections)
+        self.storage.save_steam_cache(self.steam_cache)
+        self._rebuild_conflict_index()
+        self.refresh_collection_combo()
+        self.refresh_cards()
+        self.refresh_stats()
+
+    def _show_content_widget(self, title: str, subtitle: str, widget: QWidget) -> None:
+        self._list_snapshot = (
+            self.content_title.text(), self.content_subtitle.text(), self.current_category, self.current_page,
+        )
+        self._list_scroll_position = self.scroll.verticalScrollBar().value()
+        self._saved_card_widgets = list(self._card_widgets.items())
+        while self.cards_layout.count():
+            item = self.cards_layout.takeAt(0)
+            if item.widget() is not None:
+                item.widget().hide()
+        self._content_mode = "detail"
+        self._card_widgets = {}
+        self.content_title.setText(title)
+        self.content_subtitle.setText(subtitle)
+        self.content_back_button.show()
+        self.search_input.hide()
+        self.collection_combo.hide()
+        self.pagination_bar.hide()
+        self.cards_layout.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+        self.cards_layout.addWidget(widget, 0, 0)
+
+    def show_mod_details(self, mod: Mod) -> None:
+        host = QWidget()
+        host.setObjectName("mainDetailsHost")
+        host.setMinimumWidth(max(ui(480), self.scroll.viewport().width()))
+        layout = QVBoxLayout(host)
+        layout.setContentsMargins(ui(12), ui(6), ui(12), ui(20))
+        layout.setSpacing(ui(12))
+        top = QHBoxLayout()
+        info = QVBoxLayout()
+        name = QLabel(mod.title or mod.file_name)
+        name.setObjectName("mainDetailsTitle")
+        name.setWordWrap(True)
+        name.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        info.addWidget(name)
+        code = mod.workshop_id or Path(mod.file_name).stem
+        for label, value in (("文件", mod.file_name), ("编号", code), ("作者", mod.author or "未知"), ("订阅", mod.display_subscriptions if mod.subscriptions else "暂无"), ("评分", f"{mod.rating:.1f}" if mod.rating else "暂无"), ("来源", "Steam 创意工坊" if mod.steam_loaded and mod.workshop_id else "本地文件"), ("状态", "已启用" if mod.active else "已禁用"), ("分类", "、".join(mod.categories) if mod.categories else "未分类")):
+            field = QLabel(f"{label}　{value}")
+            field.setObjectName("mainDetailsField")
+            field.setWordWrap(True)
+            field.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            info.addWidget(field)
+        if mod.steam_loaded and mod.workshop_id:
+            steam_link = QPushButton("在 Steam 创意工坊中查看")
+            steam_link.setObjectName("steamDetailsLink")
+            steam_link.setIcon(self.style().standardIcon(QStyle.SP_BrowserReload))
+            steam_link.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(f"https://steamcommunity.com/sharedfiles/filedetails/?id={mod.workshop_id}")))
+            info.addWidget(steam_link, 0, Qt.AlignLeft)
+        info.addStretch(1)
+        top.addLayout(info, 1)
+        preview = QLabel()
+        preview.setObjectName("mainDetailsPreview")
+        preview.setFixedSize(ui(340), ui(220))
+        preview.setAlignment(Qt.AlignCenter)
+        preview.setPixmap(make_preview_pixmap(mod, ui(320), ui(200)))
+        top.addWidget(preview, 0, Qt.AlignTop)
+        layout.addLayout(top)
+        path = QLabel(f"文件路径　{mod.file_path}")
+        path.setObjectName("mainDetailsField")
+        path.setWordWrap(True)
+        path.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        layout.addWidget(path)
+        description = QLabel(mod.description.strip() or "暂无描述")
+        description.setObjectName("mainDetailsDescription")
+        description.setWordWrap(True)
+        description.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        layout.addWidget(description)
+        layout.addStretch(1)
+        self._show_content_widget("Mod 详细信息", "完整 Mod 信息；内容过多时可在此区域滚动查看", host)
+
+    def show_mod_list(self) -> None:
+        if self._content_mode != "detail":
+            return
+        snapshot = getattr(self, "_list_snapshot", None)
+        saved_cards = getattr(self, "_saved_card_widgets", [])
+        self._content_mode = "mods"
+        if snapshot:
+            title, subtitle, self.current_category, self.current_page = snapshot
+            self.content_title.setText(title)
+            self.content_subtitle.setText(subtitle)
+        self.category_tree.blockSignals(True)
+        for index in range(self.category_tree.topLevelItemCount()):
+            item = self.category_tree.topLevelItem(index)
+            if item.data(0, Qt.UserRole) == self.current_category:
+                self.category_tree.setCurrentItem(item)
+                break
+        self.category_tree.blockSignals(False)
+        if not saved_cards:
+            self.refresh_cards()
+            return
+        clear_layout(self.cards_layout)
+        self._card_widgets = dict(saved_cards)
+        columns = self.card_columns()
+        card_width = self.card_width(columns)
+        for column in range(columns):
+            self.cards_layout.setColumnMinimumWidth(column, card_width)
+        for index, (_mod_id, card) in enumerate(saved_cards):
+            card.setFixedWidth(card_width)
+            card.show()
+            self.cards_layout.addWidget(card, index // columns, index % columns, Qt.AlignTop)
+        self.content_back_button.hide()
+        self.search_input.show()
+        self.collection_combo.show()
+        self._update_pagination(len(self.filtered_mods()), max(1, (len(self.filtered_mods()) + self.page_size - 1) // self.page_size))
+        self._sync_content_right_edges()
+        scroll_position = getattr(self, "_list_scroll_position", 0)
+        QTimer.singleShot(0, lambda: self.scroll.verticalScrollBar().setValue(scroll_position))
 
     def add_mod_to_collection(self, mod_id: str, collection_name: str) -> None:
         for collection in self.collections:
@@ -1312,21 +2194,32 @@ class MainWindow(QMainWindow):
                 if mod_id not in collection.mod_ids:
                     collection.mod_ids.append(mod_id)
                 self.storage.save_collections(self.collections)
-                self.refresh_cards()
                 return
 
     def filtered_mods(self) -> list[Mod]:
         mods = list(self.mods.values())
         if self.current_category != "all":
-            mods = [mod for mod in mods if self.current_category in mod.categories]
+            if self.category_mode == "simple":
+                mods = [
+                    mod for mod in mods
+                    if self.current_category in simple_categories(mod.categories, mod.title, mod.files, mod.file_name)
+                ]
+            else:
+                mods = [mod for mod in mods if self.current_category in mod.categories]
         query = self.search_input.text().strip().lower() if hasattr(self, "search_input") else ""
         if query:
             mods = [mod for mod in mods if query in " ".join([mod.title, mod.author, mod.file_name, mod.workshop_id or ""]).lower()]
-        sort_value = self.sort_combo.currentData() if hasattr(self, "sort_combo") else ("name", False)
-        sort_field, descending = sort_value if isinstance(sort_value, tuple) else ("name", False)
-        if sort_field == "modified":
-            return sorted(mods, key=self._time_sort_key, reverse=descending)
-        return sorted(mods, key=lambda mod: mod.title.casefold(), reverse=descending)
+        for mod in mods:
+            if mod.id not in self._mod_sort_cache:
+                try:
+                    self._mod_sort_cache[mod.id] = Path(mod.file_path).stat().st_mtime_ns
+                except OSError:
+                    self._mod_sort_cache[mod.id] = 0
+        return sorted(
+            mods,
+            key=lambda mod: (self._mod_sort_cache.get(mod.id, 0), mod.title.casefold()),
+            reverse=True,
+        )
 
     @staticmethod
     def _time_sort_key(mod: Mod) -> tuple[int, str]:
@@ -1337,14 +2230,6 @@ class MainWindow(QMainWindow):
             modified_at = 0
         return modified_at, mod.title.casefold()
 
-    def on_sort_changed(self) -> None:
-        sort_value = self.sort_combo.currentData()
-        sort_field, descending = sort_value if isinstance(sort_value, tuple) else ("name", False)
-        self.settings["sort_field"] = sort_field
-        self.settings["sort_descending"] = descending
-        self.storage.save_settings(self.settings)
-        self.refresh_cards()
-
     def refresh_stats(self) -> None:
         conflicts = sum(1 for mod in self.mods.values() if mod.conflict_with)
         active = sum(1 for mod in self.mods.values() if mod.active)
@@ -1352,6 +2237,9 @@ class MainWindow(QMainWindow):
         self.active_label.setText(f"已启用 {active} 个")
         self.conflict_button.setText(f"{conflicts} 个冲突" if conflicts else "无冲突")
         self.conflict_button.setEnabled(conflicts > 0)
+        if hasattr(self, "toggle_all_button"):
+            all_active = bool(self.mods) and all(mod.active for mod in self.mods.values())
+            self.toggle_all_button.setText("全部禁用" if all_active else "全部启动")
 
     def refresh_collection_combo(self) -> None:
         self._updating_collection_combo = True
@@ -1369,13 +2257,17 @@ class MainWindow(QMainWindow):
         self._update_collection_combo_label()
 
     def _ensure_default_collection(self) -> None:
-        if any(collection.name == "default" for collection in self.collections):
-            return
+        for collection in self.collections:
+            if collection.name == "default":
+                if collection.mod_ids:
+                    collection.mod_ids = []
+                    self.storage.save_collections(self.collections)
+                return
         self.collections.insert(
             0,
             ModCollection(
                 name="default",
-                mod_ids=[mod.id for mod in self.mods.values() if mod.active],
+                mod_ids=[],
             ),
         )
         self.storage.save_collections(self.collections)
@@ -1394,7 +2286,6 @@ class MainWindow(QMainWindow):
             label = f"已选 {len(selected)} 个组合"
         self.collection_combo.lineEdit().setText(label)
         self.collection_combo.setToolTip("\n".join(selected) if selected else "勾选一个或多个组合以同时加载")
-        self.delete_collection_button.setEnabled(any(name != "default" for name in selected))
 
     def on_collection_selection_changed(self) -> None:
         if self._updating_collection_combo:
@@ -1402,9 +2293,14 @@ class MainWindow(QMainWindow):
         self._selected_collection_names = set(self.collection_combo.checked_values())
         self._update_collection_combo_label()
         if self._selected_collection_names:
+            # Coalesce quick successive checks into one state/card refresh.
+            self._collection_apply_timer.start(80)
+
+    def _apply_pending_collection_selection(self) -> None:
+        if self._selected_collection_names:
             self.apply_selected_collections()
 
-    def apply_selected_collections(self, write_addonlist: bool = True) -> None:
+    def apply_selected_collections(self, write_addonlist: bool = False) -> None:
         selected = [
             collection
             for collection in self.collections
@@ -1422,16 +2318,14 @@ class MainWindow(QMainWindow):
         self._refresh_card_states()
         self.refresh_stats()
 
-    def delete_selected_collections(self) -> None:
-        removable = self._selected_collection_names - {"default"}
-        if not removable:
+    def delete_collection(self, name: str) -> None:
+        if name == "default" or not any(collection.name == name for collection in self.collections):
             QMessageBox.information(self, "无法删除", "default 是启动时的基础组合，不能删除。")
             return
-        names = "、".join(sorted(removable))
-        if QMessageBox.question(self, "删除组合", f"确定删除组合「{names}」吗？") != QMessageBox.Yes:
+        if QMessageBox.question(self, "删除组合", f"确定删除组合「{name}」吗？") != QMessageBox.Yes:
             return
-        self.collections = [collection for collection in self.collections if collection.name not in removable]
-        self._selected_collection_names -= removable
+        self.collections = [collection for collection in self.collections if collection.name != name]
+        self._selected_collection_names.discard(name)
         if not self._selected_collection_names:
             self._selected_collection_names = {"default"}
         self.storage.save_collections(self.collections)
@@ -1443,32 +2337,57 @@ class MainWindow(QMainWindow):
         if items:
             self.current_category = items[0].data(0, Qt.UserRole)
             self.content_title.setText(items[0].text(0))
+            self.current_page = 0
             self.refresh_cards()
 
     def choose_directory(self) -> None:
-        # Use the platform's native folder picker so users get the familiar
-        # Windows File Explorer experience when choosing the Mod directory.
-        directory = QtFileDialog.getExistingDirectory(
+        game_exe, _filter = QFileDialog.getOpenFileName(
             self,
-            "选择 Mod 文件夹",
-            self.settings.get("mod_dir") or str(Path.home()),
-            QtFileDialog.ShowDirsOnly,
+            "选择 Left 4 Dead 2 游戏程序",
+            self.settings.get("game_exe") or str(Path.home()),
+            "Left 4 Dead 2 (left4dead2.exe)",
         )
-        if directory:
-            self.settings["mod_dir"] = directory
-            self.storage.save_settings(self.settings)
-            self.scan_mods(False)
+        if not game_exe:
+            return
+        executable = Path(game_exe)
+        if executable.name.casefold() != "left4dead2.exe":
+            QMessageBox.warning(self, "文件不正确", "请选择 left4dead2.exe，而不是其他文件。")
+            return
+        addon_dirs = self.addon_directories(executable)
+        if not addon_dirs:
+            QMessageBox.warning(self, "目录不完整", "未找到 left4dead2\\addons 目录，请确认选择的是游戏目录中的 left4dead2.exe。")
+            return
+        self.settings["game_exe"] = str(executable.resolve())
+        self.settings["game_dir"] = str(executable.parent.resolve())
+        self.settings["mod_dir"] = str(addon_dirs[0].resolve())
+        self.storage.save_settings(self.settings)
+        self.scan_mods(True)
+
+    @staticmethod
+    def addon_directories(executable: Path) -> list[Path]:
+        game_root = executable.parent
+        nested_addons = game_root / "left4dead2" / "addons"
+        direct_addons = game_root / "addons" if game_root.name.casefold() == "left4dead2" else None
+        addons = nested_addons if nested_addons.exists() else direct_addons
+        if addons is None or not addons.exists():
+            return []
+        return [addons, addons / "workshop"]
+
+    def configured_addon_directories(self) -> list[Path]:
+        game_exe = self.settings.get("game_exe")
+        return self.addon_directories(Path(game_exe)) if game_exe else []
 
     def scan_mods(self, refresh_all: bool) -> None:
-        mod_dir = self.settings.get("mod_dir")
-        if not mod_dir:
-            QMessageBox.information(self, "需要选择目录", "请先选择保存 VPK Mod 的文件夹。")
+        addon_dirs = self.configured_addon_directories()
+        if not addon_dirs:
+            QMessageBox.information(self, "需要选择游戏", "请先选择 left4dead2.exe。")
             return
-        if not Path(mod_dir).exists():
-            QMessageBox.warning(self, "目录不存在", f"目录不存在：{mod_dir}")
+        existing_dirs = [directory for directory in addon_dirs if directory.exists()]
+        if not existing_dirs:
+            QMessageBox.warning(self, "目录不存在", "未找到游戏的 addons 目录。")
             return
-        self.set_busy(True, "正在扫描 VPK 文件…")
-        worker = Worker(scan_mod_directory, Path(mod_dir), self.mods, refresh_all)
+        self.set_busy(True, "正在扫描游戏 Mod…")
+        worker = Worker(scan_mod_directory, existing_dirs, self.mods, refresh_all)
         worker.signals.finished.connect(self.on_scan_finished)
         worker.signals.failed.connect(self.on_worker_failed)
         self.thread_pool.start(worker)
@@ -1489,6 +2408,23 @@ class MainWindow(QMainWindow):
         self._rebuild_conflict_index()
         self.storage.save_mods(self.mods)
         self.refresh_cards(); self.refresh_stats(); self.set_busy(False)
+
+    def launch_game(self) -> None:
+        game_exe = self.settings.get("game_exe")
+        if not game_exe:
+            QMessageBox.information(self, "需要选择游戏", "请先点击“选择游戏”，定位到 left4dead2.exe。")
+            return
+        executable = Path(game_exe)
+        if not executable.exists():
+            QMessageBox.warning(self, "游戏不存在", f"找不到游戏程序：{executable}\n请重新选择游戏目录。")
+            return
+        try:
+            self.storage.save_mods(self.mods)
+            if not self.write_addonlist():
+                return
+            subprocess.Popen([str(executable)], cwd=str(executable.parent))
+        except OSError as exc:
+            QMessageBox.critical(self, "启动失败", f"游戏启动失败：{exc}")
 
     def fetch_steam_info(self) -> None:
         if self.steam_sync_in_progress:
@@ -1513,7 +2449,9 @@ class MainWindow(QMainWindow):
         self.steam_sync_in_progress = True
         self._steam_cancel_event.clear()
         self.fetch_button.setEnabled(False)
-        self.fetch_button.setText("取消同步")
+        self.fetch_button.setText("")
+        self.fetch_button.setIcon(self.style().standardIcon(QStyle.SP_BrowserStop))
+        self.fetch_button.setToolTip("取消 Steam 同步")
         self.fetch_button.setEnabled(True)
         total = len(pending_mods)
         self.steam_sync_progress.setRange(0, total)
@@ -1554,7 +2492,9 @@ class MainWindow(QMainWindow):
         if not self.steam_sync_in_progress:
             return
         self._steam_cancel_event.set()
-        self.fetch_button.setText("取消中…")
+        self.fetch_button.setText("")
+        self.fetch_button.setIcon(self.style().standardIcon(QStyle.SP_BrowserStop))
+        self.fetch_button.setToolTip("正在取消 Steam 同步…")
         self.fetch_button.setEnabled(False)
         label = self.steam_sync_widget.findChild(QLabel, "steamSyncLabel")
         if label is not None:
@@ -1567,7 +2507,9 @@ class MainWindow(QMainWindow):
         QMessageBox.information(self, "Steam 同步已取消", "已停止后续 Mod 的 Steam 数据同步。")
 
     def _reset_steam_sync_controls(self) -> None:
-        self.fetch_button.setText("同步 Steam")
+        self.fetch_button.setText("")
+        self.fetch_button.setIcon(self.style().standardIcon(QStyle.SP_ArrowDown))
+        self.fetch_button.setToolTip("同步 Steam：获取创意工坊 Mod 的名称、订阅数和标签")
         self.fetch_button.setEnabled(True)
 
     def _set_steam_sync_status(self, completed: int, total: int) -> None:
@@ -1579,7 +2521,7 @@ class MainWindow(QMainWindow):
             label.setText(f"正在同步 Steam 数据… {completed}/{total}（{percent}%）")
 
     def set_all_mods_active(self, active: bool) -> None:
-        if not self.mods or all(mod.active == active for mod in self.mods.values()):
+        if not self.mods:
             return
         for mod in self.mods.values():
             mod.active = active
@@ -1587,6 +2529,10 @@ class MainWindow(QMainWindow):
         self.storage.save_mods(self.mods)
         self._refresh_card_states()
         self.refresh_stats()
+
+    def toggle_all_mods(self) -> None:
+        all_active = bool(self.mods) and all(mod.active for mod in self.mods.values())
+        self.set_all_mods_active(not all_active)
 
     def toggle_mod(self, mod_id: str) -> None:
         if mod_id in self.mods:
@@ -1597,11 +2543,112 @@ class MainWindow(QMainWindow):
             self.refresh_stats()
 
     def show_conflicts(self) -> None:
-        if any(mod.conflict_with for mod in self.mods.values()):
-            dialog = ConflictDialog(self.mods, self)
-            dialog.disable_requested.connect(self.disable_conflict_mod)
-            dialog.disable_requested.connect(dialog.refresh_after_disable)
-            dialog.exec_()
+        conflicted = [mod for mod in self.mods.values() if mod.active and mod.conflict_with]
+        if not conflicted:
+            return
+        host = QWidget()
+        host.setObjectName("mainConflictHost")
+        host.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        loading = QLabel("正在生成冲突报告…")
+        loading.setObjectName("emptyText")
+        loading.setAlignment(Qt.AlignHCenter | Qt.AlignVCenter)
+        loading.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        loading_layout = QVBoxLayout(host)
+        loading_layout.setContentsMargins(0, 0, 0, 0)
+        loading_layout.addStretch(1)
+        loading_layout.addWidget(loading, 0, Qt.AlignHCenter)
+        loading_layout.addStretch(1)
+        self._show_content_widget("冲突报告", "正在分析冲突关系…", host)
+        # Let the loading view paint before creating report cards.
+        QTimer.singleShot(80, lambda: self._build_conflict_report(host))
+
+    def _build_conflict_report(self, host: QWidget) -> None:
+        conflicted = [mod for mod in self.mods.values() if mod.active and mod.conflict_with]
+        if not conflicted:
+            return
+        report_host = QWidget()
+        report_host.setObjectName("mainConflictHost")
+        layout = QVBoxLayout(report_host)
+        layout.setContentsMargins(ui(12), ui(6), ui(12), ui(20))
+        layout.setSpacing(ui(14))
+        available_width = self.scroll.viewport().width() - ui(48)
+        spacing = ui(15)
+        columns = min(7, max(1, (available_width + spacing) // (ui(190) + spacing)))
+        card_width = max(ui(160), (available_width - spacing * (columns - 1)) // columns)
+        groups = ConflictDialog._conflict_groups(self.mods)
+        conflict_names = {
+            "rifle_ak47": "AK-47", "rifle_m16": "M16", "rifle_desert": "SCAR", "rifle_sg552": "SG552",
+            "smg_uzi": "Uzi", "smg_silenced": "消音冲锋枪", "smg_mp5": "MP5",
+            "shotgun_pump": "泵动霰弹枪", "shotgun_chrome": "铬合金霰弹枪", "shotgun_auto": "战术霰弹枪", "shotgun_spas": "SPAS-12",
+            "pistol_p220": "P220", "pistol_dual": "双持手枪", "pistol_magnum": "马格南",
+            "sniper_hunting": "猎枪", "sniper_military": "军用狙击枪", "sniper_awp": "AWP", "sniper_scout": "Scout",
+            "melee": "近战武器", "melee_katana": "武士刀", "melee_fireaxe": "消防斧", "melee_chainsaw": "电锯",
+        }
+        self._conflict_report_groups = groups
+        self._conflict_report_context = (host, report_host, layout, conflicted, columns, card_width, conflict_names)
+        QTimer.singleShot(0, lambda: self._add_conflict_report_group(0))
+
+    def _add_conflict_report_group(self, index: int) -> None:
+        if self._content_mode != "detail" or not hasattr(self, "_conflict_report_context"):
+            return
+        loading_host, report_host, layout, conflicted, columns, card_width, conflict_names = self._conflict_report_context
+        if index >= len(self._conflict_report_groups):
+            layout.addStretch(1)
+            self._show_completed_conflict_report(loading_host, report_host, len(conflicted))
+            return
+        number = index + 1
+        group = self._conflict_report_groups[index]
+        
+        section = QFrame()
+        section.setObjectName("mainConflictGroup")
+        section_layout = QVBoxLayout(section)
+        section_layout.setContentsMargins(ui(12), ui(10), ui(12), ui(12))
+        section_layout.setSpacing(ui(8))
+        shared_paths: set[str] = set()
+        for left_index, left in enumerate(group):
+            for right in group[left_index + 1:]:
+                shared_paths.update(self._conflict_paths.get(left.id, set()) & self._conflict_paths.get(right.id, set()))
+        common_categories = set(group[0].categories)
+        for mod in group[1:]:
+            common_categories.intersection_update(mod.categories)
+        targets = [conflict_names[key] for key in common_categories if key in conflict_names]
+        reason = f"均替换 {' / '.join(sorted(targets)[:2])}" if targets else (f"共享 {len(shared_paths)} 个资源文件" if shared_paths else "存在重叠资源文件")
+        heading = QLabel(f"冲突组 {number:02d}  ·  {len(group)} 个 Mod")
+        heading.setObjectName("mainConflictGroupTitle")
+        section_layout.addWidget(heading)
+        detail = QLabel(f"冲突原因：{reason}")
+        detail.setObjectName("mainConflictGroupReason")
+        detail.setToolTip("\n".join(sorted(shared_paths)) if shared_paths else reason)
+        detail.setWordWrap(True)
+        section_layout.addWidget(detail)
+        grid_host = QWidget()
+        grid = QGridLayout(grid_host)
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setHorizontalSpacing(ui(15))
+        grid.setVerticalSpacing(ui(15))
+        grid.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+        for card_index, mod in enumerate(group):
+            card = ConflictCard(mod, card_width)
+            card.disable_requested.connect(self.disable_conflict_mod)
+            grid.addWidget(card, card_index // columns, card_index % columns, Qt.AlignTop)
+        section_layout.addWidget(grid_host)
+        layout.addWidget(section)
+        QTimer.singleShot(0, lambda: self._add_conflict_report_group(index + 1))
+
+    def _show_completed_conflict_report(self, loading_host: QWidget, report_host: QWidget, conflict_count: int) -> None:
+        """Swap the already-built report in only after the loading state has painted."""
+        if self._content_mode != "detail":
+            return
+        while self.cards_layout.count():
+            item = self.cards_layout.takeAt(0)
+            if item.widget() is not None:
+                item.widget().hide()
+                item.widget().deleteLater()
+        self.cards_layout.addWidget(report_host, 0, 0)
+        report_host.show()
+        self.content_subtitle.setText(
+            f"发现 {conflict_count} 个已启用 Mod 存在资源冲突；双击卡片可禁用"
+        )
 
     def disable_conflict_mod(self, mod_id: str) -> None:
         mod = self.mods.get(mod_id)
@@ -1615,47 +2662,101 @@ class MainWindow(QMainWindow):
 
     def save_collection(self) -> None:
         active_ids = [mod.id for mod in self.mods.values() if mod.active]
+        selected = self._selected_collection_names
+        if len(selected) == 1:
+            current_name = next(iter(selected))
+            if current_name != "default":
+                for collection in self.collections:
+                    if collection.name == current_name:
+                        collection.mod_ids = active_ids
+                        break
+                self.storage.save_collections(self.collections)
+                QMessageBox.information(self, "保存完成", f"已更新组合「{current_name}」。")
+                return
         if not active_ids:
             QMessageBox.information(self, "没有已启用 Mod", "请先至少启用一个 Mod。")
             return
         name, ok = QInputDialog.getText(self, "保存 Mod 组合", "组合名称：")
         if ok and name.strip():
             name = name.strip()
+            if name == "default":
+                QMessageBox.warning(self, "无法保存", "default 是默认空组合，请换一个组合名称。")
+                return
             self.collections = [item for item in self.collections if item.name != name]
             self.collections.append(ModCollection(name=name, mod_ids=active_ids))
             self.storage.save_collections(self.collections)
             self._selected_collection_names = {name}
             self.refresh_collection_combo()
-            self.apply_selected_collections()
-            QMessageBox.information(self, "保存完成", f"已保存「{name}」，并写入 addonlist.txt。")
+            QMessageBox.information(self, "保存完成", f"已保存「{name}」。")
 
-    def write_addonlist(self) -> None:
-        mod_dir = self.settings.get("mod_dir")
-        if mod_dir:
-            lines = ['"AddonList"', "{\n"]
-            for mod in sorted(self.mods.values(), key=lambda item: item.file_name.lower()):
-                lines.append(f'\t"{mod.file_name.replace(chr(92), "/")}"\t\t"{"1" if mod.active else "0"}"\n')
-            lines.append("}\n")
-            Path(mod_dir, "addonlist.txt").write_text("".join(lines), encoding="utf-8")
+    def write_addonlist(self) -> bool:
+        addon_dirs = self.configured_addon_directories()
+        if not addon_dirs:
+            QMessageBox.warning(self, "无法写入", "请先选择有效的 Left 4 Dead 2 游戏目录。")
+            return False
+        addon_root = addon_dirs[0].resolve()
+        addonlist_path = addon_root.parent / "addonlist.txt"
+        entries: list[tuple[str, bool]] = []
+        for mod in self.mods.values():
+            file_path = Path(mod.file_path)
+            try:
+                relative_path = file_path.resolve().relative_to(addon_root)
+            except ValueError:
+                continue
+            entries.append((str(relative_path).replace("/", "\\"), mod.active))
+        lines = ['"AddonList"\n', "{\n"]
+        for relative_path, active in sorted(entries, key=lambda item: item[0].casefold()):
+            lines.append(f'\t"{relative_path}"\t\t"{"1" if active else "0"}"\n')
+        lines.append("}\n")
+        try:
+            addonlist_path.parent.mkdir(parents=True, exist_ok=True)
+            addonlist_path.write_text("".join(lines), encoding="utf-8")
+        except OSError as exc:
+            QMessageBox.critical(self, "写入失败", f"无法写入 addonlist.txt：{exc}")
+            return False
+        return True
 
     def on_worker_failed(self, message: str) -> None:
         self.set_busy(False)
         QMessageBox.critical(self, "操作失败", message)
 
     def set_busy(self, busy: bool, message: str = "") -> None:
-        for button in (self.choose_button, self.refresh_button, self.fetch_button, self.enable_all_button, self.disable_all_button, self.save_button):
+        for button in (self.choose_button, self.refresh_button, self.fetch_button, self.toggle_all_button, self.save_button, self.launch_button):
             button.setEnabled(not busy)
         self.fetch_button.setEnabled(not busy and not self.steam_sync_in_progress)
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
+        if hasattr(self, "_cards_loading_overlay") and self._cards_loading_overlay.isVisible():
+            self._cards_loading_overlay.setGeometry(self.scroll.viewport().rect())
         if hasattr(self, "cards_layout"):
-            QTimer.singleShot(0, self.refresh_cards)
+            self._schedule_cards_refresh()
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
-        QTimer.singleShot(100, self.refresh_cards)
+        self._apply_native_window_corner()
 
+    def _apply_native_window_corner(self) -> None:
+        """Ask Windows DWM to render smooth native rounded window corners."""
+        if sys.platform != "win32":
+            return
+        try:
+            hwnd = int(self.winId())
+            if not hwnd:
+                return
+            # DWMWA_WINDOW_CORNER_PREFERENCE = 33
+            # DWMWCP_ROUND = 2
+            preference = ctypes.c_int(2)
+            dwmapi = ctypes.WinDLL("dwmapi")
+            dwmapi.DwmSetWindowAttribute(
+                ctypes.c_void_p(hwnd),
+                ctypes.c_uint(33),
+                ctypes.byref(preference),
+                ctypes.sizeof(preference),
+            )
+        except (AttributeError, OSError, TypeError, ValueError):
+            # Older Windows versions or unusual test backends may not expose DWM.
+            return
 
 def steam_sync_candidates(mods: dict[str, Mod]) -> dict[str, Mod]:
     """Return only Workshop Mods without successfully cached Steam metadata."""
@@ -1713,18 +2814,18 @@ def make_tag_button(text: str, color: str, tooltip: str, handler) -> QPushButton
     return button
 
 
-def make_preview_pixmap(mod: Mod) -> QPixmap:
-    cache_key = mod.image_path or "__placeholder__"
+def make_preview_pixmap(mod: Mod, max_width: int = ui(188), max_height: int = ui(104)) -> QPixmap:
+    cache_key = (mod.image_path or "__placeholder__", max_width, max_height)
     cached = PREVIEW_CACHE.get(cache_key)
     if cached is not None:
         return cached
     if mod.image_path and Path(mod.image_path).exists():
         pixmap = QPixmap(mod.image_path)
         if not pixmap.isNull():
-            result = pixmap.scaled(ui(188), ui(104), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            result = pixmap.scaled(max_width, max_height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
             PREVIEW_CACHE[cache_key] = result
             return result
-    pixmap = QPixmap(ui(188), ui(104))
+    pixmap = QPixmap(max_width, max_height)
     gradient = QLinearGradient(0, 0, pixmap.width(), pixmap.height())
     gradient.setColorAt(0, QColor("#263d61")); gradient.setColorAt(1, QColor("#151c29"))
     painter = QPainter(pixmap)

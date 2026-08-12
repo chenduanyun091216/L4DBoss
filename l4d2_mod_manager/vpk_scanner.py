@@ -11,15 +11,17 @@ from .models import Mod
 IMAGE_SUFFIXES = [".jpg", ".jpeg", ".png", ".webp"]
 
 
-def scan_mod_directory(directory: Path, existing: dict[str, Mod] | None = None, refresh_all: bool = False) -> dict[str, Mod]:
+def scan_mod_directory(directory: Path | list[Path], existing: dict[str, Mod] | None = None, refresh_all: bool = False) -> dict[str, Mod]:
     existing = existing or {}
     result = {} if refresh_all else dict(existing)
-    for file_path in sorted(directory.glob("*.vpk")):
+    directories = [directory] if isinstance(directory, Path) else directory
+    file_paths = [file_path for folder in directories if folder.exists() for file_path in folder.glob("*.vpk")]
+    for file_path in sorted(file_paths):
         mod_id = make_mod_id(file_path)
         if not refresh_all and mod_id in result:
             continue
         result[mod_id] = parse_vpk_file(file_path, mod_id)
-    valid_paths = {str(path.resolve()) for path in directory.glob("*.vpk")}
+    valid_paths = {str(path.resolve()) for path in file_paths}
     return {mod_id: mod for mod_id, mod in result.items() if str(Path(mod.file_path).resolve()) in valid_paths}
 
 

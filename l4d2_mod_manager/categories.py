@@ -147,6 +147,60 @@ CATEGORIES = [
     },
 ]
 
+SIMPLE_CATEGORIES = [
+    {"id": "all", "label": "所有 All", "children": []},
+    {
+        "id": "guns", "label": "枪械 Guns", "children": [
+            {"id": "pistol", "label": "手枪 Pistols", "children": [
+                ("pistol_p220", "P220"), ("pistol_dual", "双持手枪 Dual Pistols"), ("pistol_magnum", "马格南 Magnum"),
+            ]},
+            {"id": "smg", "label": "冲锋枪 SMGs", "children": [
+                ("smg_uzi", "Uzi"), ("smg_silenced", "消音冲锋枪 Silenced SMG"), ("smg_mp5", "MP5"),
+            ]},
+            {"id": "rifle", "label": "步枪 Rifles", "children": [
+                ("rifle_m16", "M16"), ("rifle_ak47", "AK-47"), ("rifle_desert", "SCAR"), ("rifle_sg552", "SG552"),
+            ]},
+            {"id": "shotgun", "label": "霰弹枪 Shotguns", "children": [
+                ("shotgun_pump", "泵动霰弹枪 Pump Shotgun"), ("shotgun_chrome", "铬合金霰弹枪 Chrome Shotgun"),
+                ("shotgun_auto", "战术霰弹枪 Tactical Shotgun"), ("shotgun_spas", "SPAS-12"),
+            ]},
+            {"id": "sniper", "label": "狙击枪 Snipers", "children": [
+                ("sniper_hunting", "猎枪 Hunting Rifle"), ("sniper_military", "军用狙击枪 Military Sniper"),
+                ("sniper_awp", "AWP"), ("sniper_scout", "Scout"),
+            ]},
+            ("grenade_launcher", "榴弹发射器 Grenade Launcher"),
+            ("m60", "M60"),
+        ],
+    },
+    {
+        "id": "melee", "label": "近战武器 Melee", "children": [
+            ("melee_bat", "棒球棍 Baseball Bat"), ("melee_cricket_bat", "板球棍 Cricket Bat"),
+            ("melee_crowbar", "撬棍 Crowbar"), ("melee_electric_guitar", "电吉他 Electric Guitar"), ("melee_fireaxe", "消防斧 Fire Axe"),
+            ("melee_frying_pan", "平底锅 Frying Pan"), ("melee_golfclub", "高尔夫球杆 Golf Club"), ("melee_katana", "武士刀 Katana"),
+            ("melee_machete", "砍刀 Machete"), ("melee_pitchfork", "干草叉 Pitchfork"), ("melee_shovel", "铲子 Shovel"),
+            ("melee_tonfa", "警棍 Tonfa"), ("melee_chainsaw", "电锯 Chainsaw"), ("melee_knife", "小刀 Knife"),
+        ],
+    },
+    {
+        "id": "utils", "label": "实用工具 Utils", "children": [
+            ("items", "物品 Items"), ("throwable", "投掷物 Throwables"), ("sounds", "声音 Sounds"),
+            ("scripts", "脚本 Scripts"), ("ui", "界面 UI"), ("models", "模型 Models"), ("textures", "贴图 Textures"),
+        ],
+    },
+    {"id": "survivors", "label": "幸存者 Survivors", "children": [
+        ("bill", "比尔 Bill"), ("francis", "弗朗西斯 Francis"), ("louis", "路易斯 Louis"), ("zoey", "佐伊 Zoey"),
+        ("coach", "教练 Coach"), ("ellis", "艾利斯 Ellis"), ("nick", "尼克 Nick"), ("rochelle", "罗谢尔 Rochelle"),
+    ]},
+    {"id": "infected", "label": "感染者 Infected", "children": [
+        ("common_infected", "普通感染者 Common Infected"), ("boomer", "胖子 Boomer"), ("charger", "冲撞者 Charger"),
+        ("hunter", "猎人 Hunter"), ("jockey", "骑师 Jockey"), ("smoker", "舌头 Smoker"),
+        ("spitter", "喷吐者 Spitter"), ("tank", "坦克 Tank"), ("witch", "女巫 Witch"),
+    ]},
+    {"id": "misc", "label": "杂项 Misc", "children": []},
+    {"id": "maps", "label": "地图 Maps", "children": []},
+    {"id": "others", "label": "其他 Others", "children": []},
+]
+
 KEYWORD_CATEGORY_RULES: list[tuple[str, str]] = [
     ("bill", "bill"), ("francis", "francis"), ("louis", "louis"), ("zoey", "zoey"),
     ("coach", "coach"), ("ellis", "ellis"), ("nick", "nick"), ("rochelle", "rochelle"),
@@ -246,6 +300,75 @@ def infer_categories(
 def normalize_search_text(value: str) -> str:
     value = value.lower().replace("\\", "/")
     return re.sub(r"[\-_]+", " ", value)
+
+
+SIMPLE_MELEE_ALIASES = {
+    "melee_bat": ("baseball bat", "baseballbat"),
+    "melee_cricket_bat": ("cricket bat", "cricketbat"),
+    "melee_crowbar": ("crowbar",),
+    "melee_electric_guitar": ("electric guitar", "electricguitar"),
+    "melee_fireaxe": ("fire axe", "fireaxe"),
+    "melee_frying_pan": ("frying pan", "fryingpan"),
+    "melee_golfclub": ("golf club", "golfclub"),
+    "melee_katana": ("katana",),
+    "melee_machete": ("machete",),
+    "melee_pitchfork": ("pitchfork",),
+    "melee_shovel": ("shovel",),
+    "melee_tonfa": ("tonfa",),
+    "melee_chainsaw": ("chainsaw",),
+    "melee_knife": ("knife",),
+}
+
+
+def simple_categories(
+    categories: list[str],
+    title: str = "",
+    paths: list[str] | None = None,
+    file_name: str = "",
+) -> set[str]:
+    """Map detailed Steam/content categories into Funky-style simple groups."""
+    source = set(categories)
+    result: set[str] = set()
+
+    gun_types = {
+        "pistol", "pistol_p220", "pistol_dual", "pistol_magnum", "smg", "smg_uzi",
+        "smg_silenced", "smg_mp5", "rifle", "rifle_m16", "rifle_ak47", "rifle_desert",
+        "rifle_sg552", "shotgun", "shotgun_pump", "shotgun_chrome", "shotgun_auto",
+        "shotgun_spas", "sniper", "sniper_hunting", "sniper_military", "sniper_awp",
+        "sniper_scout", "grenade_launcher", "m60", "weapons",
+    }
+    if source & gun_types:
+        result.add("guns")
+        result.update(source & gun_types)
+
+    if "melee" in source:
+        result.add("melee")
+        haystack = normalize_search_text(" ".join([title, file_name, *(paths or [])]))
+        for category, aliases in SIMPLE_MELEE_ALIASES.items():
+            if any(normalize_search_text(alias) in haystack for alias in aliases):
+                result.add(category)
+
+    if source & {"items", "adrenaline", "defibrillator", "medkit", "pills", "other", "throwable", "throwable_molotov", "throwable_pipe_bomb", "throwable_vomitjar", "sounds", "scripts", "ui", "models", "textures"}:
+        result.add("utils")
+        result.update(source & {"items", "throwable", "sounds", "scripts", "ui", "models", "textures"})
+
+    survivor_ids = {"survivors", "bill", "francis", "louis", "zoey", "coach", "ellis", "nick", "rochelle"}
+    if source & survivor_ids:
+        result.add("survivors")
+        result.update(source & survivor_ids)
+
+    infected_ids = {"infected", "common_infected", "special_infected", "boomer", "charger", "hunter", "jockey", "smoker", "spitter", "tank", "witch"}
+    if source & infected_ids:
+        result.add("infected")
+        result.update(source & infected_ids)
+
+    if source & {"campaigns"}:
+        result.add("maps")
+    if source & {"miscellaneous"}:
+        result.add("misc")
+    if not result:
+        result.add("others")
+    return result
 
 
 def categories_from_steam_tags(tags: list[str]) -> set[str]:
