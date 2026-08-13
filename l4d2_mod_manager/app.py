@@ -21,7 +21,7 @@ from PyQt5.QtGui import QColor, QDesktopServices, QFont, QIcon, QLinearGradient,
 from PyQt5.QtWidgets import (
     QAction, QApplication, QComboBox, QDialog, QFileDialog, QFrame, QGridLayout,
     QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMainWindow, QMenu, QMessageBox,
-    QAbstractItemView, QProgressBar, QPushButton, QScrollArea, QSizePolicy, QSplitter, QStyle,
+    QAbstractItemView, QProgressBar, QPushButton, QScrollArea, QSizeGrip, QSizePolicy, QSplitter, QStyle,
     QStyledItemDelegate, QStyleOptionViewItem, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget, QWidgetAction,
 )
 
@@ -624,18 +624,26 @@ class ModCard(QFrame):
     clicked = pyqtSignal(str)
     context_requested = pyqtSignal(str, object)
     favorite_toggled = pyqtSignal(str)
+    BASE_WIDTH = ui(214)
+    BASE_HEIGHT = ui(258)
 
     def __init__(self, mod: Mod, collection_names: list[str] | None = None, width: int | None = None):
         super().__init__()
         self.mod = mod
-        card_width = width or ui(214)
+        target_width = width or self.BASE_WIDTH
+        # Build every widget from the same base geometry, then apply the
+        # requested scale once the complete card exists. Previously a newly
+        # created non-default-width card kept BASE_HEIGHT while cached cards
+        # used their scaled height, producing uneven rows.
+        card_width = self.BASE_WIDTH
         self.setObjectName(
             "modCardConflict" if mod.active and mod.conflict_with else ("modCardActive" if mod.active else "modCard")
         )
         self.setCursor(Qt.PointingHandCursor)
         # Card height now hugs the content so there is no large empty gap below
         # the action button. The preview area is enlarged instead.
-        self.setFixedSize(card_width, ui(258))
+        self._card_width = card_width
+        self.setFixedSize(card_width, self.BASE_HEIGHT)
         self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         self.setProperty("favorite", "true" if mod.favorite else "false")
 
@@ -644,6 +652,7 @@ class ModCard(QFrame):
         layout.setSpacing(ui(0))
         preview = HoverPreview(mod, card_width - ui(20), ui(112), self)
         preview.setObjectName("preview")
+        self.preview = preview
         layout.addWidget(preview)
 
         title = TwoLineElidedLabel(mod.title or mod.file_name)
@@ -654,6 +663,7 @@ class ModCard(QFrame):
         # 40px gives two 13px lines comfortable headroom so descenders on the
         # second line are no longer truncated.
         title.setFixedHeight(ui(40))
+        self.title_label = title
         layout.addSpacing(ui(2))
         layout.addWidget(title)
 
@@ -670,6 +680,7 @@ class ModCard(QFrame):
         meta.setObjectName("cardMeta")
         meta.setWordWrap(True)
         meta.setFixedHeight(ui(14))
+        self.meta_label = meta
         layout.addWidget(meta)
 
         type_labels = [text for text, _color in mod_type_tags(mod)]
@@ -677,11 +688,13 @@ class ModCard(QFrame):
         type_summary.setObjectName("typeSummary")
         type_summary.setToolTip("类型标签：" + ("、".join(type_labels) if type_labels else "暂无"))
         type_summary.setFixedHeight(ui(14))
+        self.type_summary_label = type_summary
         layout.addWidget(type_summary)
 
         star = self._build_favorite_star()
         tags_container = QWidget()
         tags_container.setFixedHeight(ui(28))
+        self.tags_container = tags_container
         tags = QHBoxLayout(tags_container)
         tags.setContentsMargins(0, 0, 0, 0)
         self.tags_layout = tags
@@ -708,6 +721,72 @@ class ModCard(QFrame):
         button.clicked.connect(lambda: self.clicked.emit(self.mod.id))
         action_row.addWidget(button, 1)
         layout.addLayout(action_row)
+        self.set_card_width(target_width)
+
+    def set_card_width(self, width: int) -> None:
+        """Resize the complete card using one scale factor.
+
+        Keeping all geometry derived from the original 214x258 design prevents
+        the preview, title, tags and action row from becoming distorted when
+        the window or the card-size slider changes.
+        """
+        width = max(ui(160), int(width))
+        if width == self._card_width:
+            return
+        scale = width / self.BASE_WIDTH
+        height = max(ui(190), round(self.BASE_HEIGHT * scale))
+        self._card_width = width
+        self.setFixedSize(width, height)
+        self.layout().setContentsMargins(
+            round(ui(10) * scale), round(ui(10) * scale),
+            round(ui(10) * scale), round(ui(8) * scale),
+        )
+        self.preview.setFixedSize(max(1, width - round(ui(20) * scale)), round(ui(112) * scale))
+        self.title_label.setFixedHeight(round(ui(40) * scale))
+        self.meta_label.setFixedHeight(round(ui(14) * scale))
+        self.type_summary_label.setFixedHeight(round(ui(14) * scale))
+        self.tags_container.setFixedHeight(round(ui(28) * scale))
+        self.favorite_star.setFixedSize(round(ui(28) * scale), round(ui(28) * scale))
+        self.toggle_button.setFixedHeight(round(ui(22) * scale))
+        self._apply_scaled_fonts(scale)
+
+    @staticmethod
+    def _scaled_px(base: int, scale: float) -> int:
+        return max(7, round(base * scale))
+
+    def _apply_scaled_fonts(self, scale: float) -> None:
+        """Scale text and chip metrics together with the card geometry."""
+        title_size = self._scaled_px(13, scale)
+        meta_size = self._scaled_px(10, scale)
+        summary_size = self._scaled_px(9, scale)
+        action_size = self._scaled_px(11, scale)
+        star_size = self._scaled_px(18, scale)
+        tag_size = self._scaled_px(9, scale)
+        font_key = (title_size, meta_size, summary_size, action_size, star_size, tag_size)
+        if getattr(self, "_font_scale_key", None) == font_key:
+            return
+        self._font_scale_key = font_key
+        self.title_label.setStyleSheet(f"font-size: {title_size}px;")
+        self.meta_label.setStyleSheet(f"font-size: {meta_size}px;")
+        self.type_summary_label.setStyleSheet(f"font-size: {summary_size}px;")
+        self.favorite_star.setStyleSheet(f"font-size: {star_size}px;")
+        self.toggle_button.setStyleSheet(
+            f"font-size: {action_size}px; min-height: {round(ui(24) * scale)}px;"
+            f" max-height: {round(ui(24) * scale)}px;"
+        )
+        for index in range(self.tags_layout.count()):
+            widget = self.tags_layout.itemAt(index).widget()
+            if widget is None or widget is self.favorite_star:
+                continue
+            object_name = widget.objectName()
+            if object_name not in ("tag", "tagButton"):
+                continue
+            base_style = getattr(widget, "_base_style", widget.styleSheet())
+            widget._base_style = base_style
+            widget.setStyleSheet(
+                f"{base_style} #{object_name} {{ font-size: {tag_size}px;"
+                f" min-height: {round(ui(20) * scale)}px; max-height: {round(ui(20) * scale)}px; }}"
+            )
 
 
     def _build_favorite_star(self) -> QPushButton:
@@ -789,6 +868,7 @@ class ModCard(QFrame):
         self.style().polish(self)
         self.toggle_button.style().unpolish(self.toggle_button)
         self.toggle_button.style().polish(self.toggle_button)
+        self._apply_scaled_fonts(self._card_width / self.BASE_WIDTH)
         self.update()
 
     def mousePressEvent(self, event) -> None:
@@ -957,7 +1037,11 @@ class DragHeader(QFrame):
 
     def mouseDoubleClickEvent(self, event) -> None:
         if event.button() == Qt.LeftButton:
-            self.target.toggle_maximized()
+            restore_default = getattr(self.target, "restore_default_window", None)
+            if restore_default is not None:
+                restore_default()
+            elif self.target.isMaximized():
+                self.target.showNormal()
             event.accept()
             return
         super().mouseDoubleClickEvent(event)
@@ -1877,7 +1961,6 @@ class MainWindow(QMainWindow):
         self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.scroll.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.scroll.viewport().setObjectName("cardsViewport")
-        self.scroll.verticalScrollBar().rangeChanged.connect(self._schedule_content_alignment)
         self._cards_loading_overlay = QFrame(self.scroll)
         self._cards_loading_overlay.setObjectName("cardsLoadingOverlay")
         loading_layout = QVBoxLayout(self._cards_loading_overlay)
@@ -1933,6 +2016,23 @@ class MainWindow(QMainWindow):
         pagination_layout.addWidget(self.page_label)
         pagination_layout.addWidget(self.next_page_button)
         pagination_layout.addStretch(1)
+        size_label = QLabel("卡片大小")
+        size_label.setObjectName("pageLabel")
+        size_label.setToolTip("调整卡片大小；卡片会保持宽高比例")
+        self._card_size = ui(214)
+        self.card_size_decrease = QPushButton("-")
+        self.card_size_decrease.setObjectName("paginationButton")
+        self.card_size_decrease.setFixedSize(ui(26), ui(22))
+        self.card_size_decrease.setToolTip("缩小卡片")
+        self.card_size_decrease.clicked.connect(lambda: self._change_card_size(-ui(10)))
+        self.card_size_increase = QPushButton("+")
+        self.card_size_increase.setObjectName("paginationButton")
+        self.card_size_increase.setFixedSize(ui(26), ui(22))
+        self.card_size_increase.setToolTip("放大卡片")
+        self.card_size_increase.clicked.connect(lambda: self._change_card_size(ui(10)))
+        pagination_layout.addWidget(size_label)
+        pagination_layout.addWidget(self.card_size_decrease)
+        pagination_layout.addWidget(self.card_size_increase)
         self.pagination_spacer = QWidget()
         self.pagination_spacer.setFixedHeight(ui(10))
         content_layout.addWidget(self.pagination_spacer)
@@ -1946,6 +2046,10 @@ class MainWindow(QMainWindow):
         root.addWidget(body, 1)
         root.addWidget(self._build_footer())
         self.setCentralWidget(central)
+        self._size_grip = QSizeGrip(central)
+        self._size_grip.setFixedSize(ui(18), ui(18))
+        self._size_grip.move(central.width() - self._size_grip.width(), central.height() - self._size_grip.height())
+        self._size_grip.raise_()
 
     def _build_header(self) -> QWidget:
         header = DragHeader(self)
@@ -2098,10 +2202,20 @@ class MainWindow(QMainWindow):
     def toggle_maximized(self) -> None:
         if self.isMaximized():
             self.showNormal()
-            self.maximize_button.setText("□")
+            self.maximize_button.setText("❐")
         else:
             self.showMaximized()
             self.maximize_button.setText("❐")
+
+        self._suppress_content_alignment = False
+        # Re-align controls only for the explicit window-state transition.
+        self._schedule_window_state_alignment()
+
+    def restore_default_window(self) -> None:
+        """Restore the main window to its normal startup dimensions."""
+        self.showNormal()
+        self.resize(ui(1200), ui(820))
+        self._schedule_window_state_alignment()
 
     def _show_header_hint(self, text: str) -> None:
         self.header_hint.setText(text)
@@ -2214,7 +2328,7 @@ class MainWindow(QMainWindow):
         self.search_input.textChanged.connect(self.on_search_changed)
         self.collection_combo = MultiSelectComboBox()
         self.collection_combo.setObjectName("collectionCombo")
-        self.collection_combo.setMinimumWidth(ui(210))
+        self.collection_combo.setFixedWidth(ui(214))
         self.collection_combo.setMaxVisibleItems(7)
         self.collection_combo.view().setObjectName("collectionComboMenu")
         self.collection_combo.view().setTextElideMode(Qt.ElideRight)
@@ -2547,7 +2661,7 @@ class MainWindow(QMainWindow):
             else:
                 card.mod = mod
                 card.refresh_state()
-                card.setFixedWidth(card_width)
+                card.set_card_width(card_width)
             self._card_widgets[mod.id] = card
             self.cards_layout.addWidget(card, index // columns, index % columns, Qt.AlignTop)
             # Reparent through the layout first; showing it earlier would make
@@ -2570,8 +2684,11 @@ class MainWindow(QMainWindow):
 
     def _update_pagination(self, total: int, total_pages: int) -> None:
         visible = total_pages > 1
-        self.pagination_bar.setVisible(visible)
-        self.pagination_spacer.setVisible(visible)
+        self.pagination_bar.setVisible(True)
+        self.pagination_spacer.setVisible(True)
+        self.previous_page_button.setVisible(visible)
+        self.page_label.setVisible(visible)
+        self.next_page_button.setVisible(visible)
         if not visible:
             return
         self.page_label.setText(f"第 {self.current_page + 1} / {total_pages} 页")
@@ -2586,16 +2703,58 @@ class MainWindow(QMainWindow):
         self.current_page = 0
         self._search_refresh_timer.start(120)
 
+    def _change_card_size(self, delta: int) -> None:
+        self._card_size_adjustment_token = getattr(self, "_card_size_adjustment_token", 0) + 1
+        adjustment_token = self._card_size_adjustment_token
+        self._suppress_content_alignment = True
+        old_columns = self.card_columns() if hasattr(self, "cards_layout") else 1
+        candidate = max(ui(160), min(ui(300), self._card_size + delta))
+        # Cards fill their row, so a small target-size change is not visible
+        # until it changes the column count. Skip invisible intermediate
+        # values and land on the next column threshold in one click.
+        if delta > 0:
+            while candidate < ui(300) and self._columns_for_card_size(candidate) == old_columns:
+                candidate = min(ui(300), candidate + ui(10))
+        elif delta < 0:
+            while candidate > ui(160) and self._columns_for_card_size(candidate) == old_columns:
+                candidate = max(ui(160), candidate - ui(10))
+        self._card_size = candidate
+        self.card_size_decrease.setEnabled(self._card_size > ui(160))
+        self.card_size_increase.setEnabled(self._card_size < ui(300))
+        size_text = f"当前卡片宽度约 {self._card_size}px；卡片保持等比例缩放"
+        self.card_size_decrease.setToolTip(f"缩小卡片（{size_text}）")
+        self.card_size_increase.setToolTip(f"放大卡片（{size_text}）")
+        if hasattr(self, "cards_layout") and self._content_mode == "mods" and self._cards_ready_for_reflow:
+            self._reflow_cards()
+            self._sync_content_right_edges(force=True)
+        # Keep queued scrollbar/layout callbacks from moving the controls
+        # immediately after a card-size click. A newer click extends this
+        # quiet period through the token check.
+        QTimer.singleShot(100, lambda: self._release_card_size_alignment(adjustment_token))
+
+    def _release_card_size_alignment(self, token: int) -> None:
+        if token == getattr(self, "_card_size_adjustment_token", -1):
+            self._suppress_content_alignment = False
+
+    def _columns_for_card_size(self, preferred: int) -> int:
+        width = self._card_viewport_width()
+        spacing = self.cards_layout.horizontalSpacing() if hasattr(self, "cards_layout") else ui(11)
+        return max(1, (width + spacing) // (preferred + spacing))
+
     def card_columns(self) -> int:
         width = self._card_viewport_width()
         spacing = self.cards_layout.horizontalSpacing() if hasattr(self, "cards_layout") else ui(11)
         # Four compact cards should fit in the default window.  Cards expand to
         # use any extra room, so the final column never leaves a large dead area.
-        return max(1, (width + spacing) // (ui(200) + spacing))
+        preferred = getattr(self, "_card_size", ui(214))
+        return max(1, (width + spacing) // (preferred + spacing))
 
     def card_width(self, columns: int) -> int:
         width = self._card_viewport_width()
         spacing = self.cards_layout.horizontalSpacing() if hasattr(self, "cards_layout") else ui(11)
+        # The size buttons select the preferred scale and therefore the number
+        # of columns. The cards themselves always expand to fill the complete
+        # available row, so resizing never leaves a dead area on the right.
         return max(ui(160), (width - spacing * (columns - 1)) // columns)
 
     def _card_viewport_width(self) -> int:
@@ -2634,12 +2793,14 @@ class MainWindow(QMainWindow):
         ):
             return
         self._card_refresh_pending = True
-        QTimer.singleShot(120, self._refresh_cards_after_layout)
+        # Coalesce bursts of native resize events to roughly one visual update
+        # per frame. This keeps dragging responsive without building a queue of
+        # expensive card-layout and style recalculations.
+        QTimer.singleShot(16, self._refresh_cards_after_layout)
 
     def _refresh_cards_after_layout(self) -> None:
         self._card_refresh_pending = False
         self._reflow_cards()
-        self._sync_content_right_edges()
 
     def _reflow_cards(self) -> None:
         """Reposition existing cards after a resize without rebuilding previews."""
@@ -2651,13 +2812,31 @@ class MainWindow(QMainWindow):
         for column in range(existing_columns):
             self.cards_layout.setColumnMinimumWidth(column, card_width if column < columns else 0)
             self.cards_layout.setColumnStretch(column, 0)
-        for index, card in enumerate(self._card_widgets.values()):
-            self.cards_layout.removeWidget(card)
-            card.setFixedWidth(card_width)
-            self.cards_layout.addWidget(card, index // columns, index % columns, Qt.AlignTop)
+        previous_columns = getattr(self, "_displayed_card_columns", None)
+        # During ordinary window dragging only the card width changes. Keep the
+        # existing grid items in place; removing and re-adding every widget on
+        # every resize is the main source of visible flashing.
+        if previous_columns == columns:
+            for card in self._card_widgets.values():
+                card.set_card_width(card_width)
+            self.cards_layout.invalidate()
+            return
 
-    def _sync_content_right_edges(self) -> None:
+        self.cards_host.setUpdatesEnabled(False)
+        try:
+            for index, card in enumerate(self._card_widgets.values()):
+                self.cards_layout.removeWidget(card)
+                card.set_card_width(card_width)
+                self.cards_layout.addWidget(card, index // columns, index % columns, Qt.AlignTop)
+            self._displayed_card_columns = columns
+        finally:
+            self.cards_host.setUpdatesEnabled(True)
+            self.cards_host.update()
+
+    def _sync_content_right_edges(self, force: bool = False) -> None:
         """Make controls end exactly where the visible card viewport ends."""
+        if getattr(self, "_suppress_content_alignment", False) and not force:
+            return
         self._content_alignment_pending = False
         if not hasattr(self, "scroll"):
             return
@@ -2666,6 +2845,18 @@ class MainWindow(QMainWindow):
         # the toolbar, pagination and footer actions from jumping right when
         # the first page becomes tall enough to show the bar.
         inset = scrollbar.width() or scrollbar.sizeHint().width()
+        # Align to the calculated edge of a complete card row.  A viewport
+        # width is not always divisible by the selected column count; using
+        # its right edge leaves the toolbar a few pixels past the last card.
+        # This is calculated from the same inputs as card_width(), so it does
+        # not depend on stale widget geometry during maximize/restore.
+        if self.scroll.viewport().width() > 0 and self.content_bar.width() > 0:
+            bar_left = self.content_bar.mapToGlobal(QPoint(0, 0)).x()
+            columns = self.card_columns()
+            card_width = self.card_width(columns)
+            grid_width = columns * card_width + (columns - 1) * self.cards_layout.horizontalSpacing()
+            grid_right = self.scroll.viewport().mapToGlobal(QPoint(grid_width, 0)).x()
+            inset = max(0, self.content_bar.width() - (grid_right - bar_left))
         self.content_bar.layout().setContentsMargins(0, 0, inset, 0)
         self.pagination_bar.layout().setContentsMargins(0, 0, inset, 0)
         # Match both toolbar controls to one card column.  As the combo box
@@ -2674,18 +2865,26 @@ class MainWindow(QMainWindow):
         if hasattr(self, "search_input") and hasattr(self, "collection_combo"):
             control_width = self.card_width(self.card_columns())
             self.collection_combo.setFixedWidth(control_width)
-            # Keep the combo box anchored to the card grid's right edge, then
-            # derive the search width from the combo box's stable left edge.
-            # Using the search box's previous geometry here can retain a stale
-            # oversized width during the first layout pass.
+            # Derive both filter widths from the target card edge.  Reading
+            # the combo box's current position here retains stale geometry
+            # after maximizing and can push it beyond the card grid.
             if hasattr(self, "choose_button"):
-                self.content_bar.layout().activate()
-                search_right = self.collection_combo.mapToGlobal(QPoint(0, 0)).x() - self.cards_layout.horizontalSpacing()
-                target_left = self.choose_button.mapToGlobal(QPoint(0, 0)).x()
                 content_left = self.content_bar.mapToGlobal(QPoint(0, 0)).x()
                 bar_gap = self.content_bar.layout().spacing()
-                self.content_title_host.setFixedWidth(max(ui(1), target_left - content_left - bar_gap))
-                self.search_input.setFixedWidth(max(ui(160), search_right - target_left))
+                # A compact window can place the header button left of the
+                # content area. Never let that make the filter layout extend
+                # outside its own parent.
+                # The title and the outer layout's gap precede the filters,
+                # so account for both when the header button falls outside a
+                # compact content area.
+                target_left = max(
+                    content_left + ui(1) + bar_gap,
+                    self.choose_button.mapToGlobal(QPoint(0, 0)).x(),
+                )
+                self.content_title_host.setFixedWidth(target_left - content_left - bar_gap)
+                self.search_input.setFixedWidth(max(
+                    ui(1), grid_right - target_left - control_width - self._filter_controls.spacing(),
+                ))
                 self._filter_controls.invalidate()
                 self.content_bar.layout().invalidate()
                 self.content_bar.layout().activate()
@@ -2705,8 +2904,26 @@ class MainWindow(QMainWindow):
             # gutter as well when aligning its final action to the viewport.
             self.action_host.layout().setContentsMargins(ui(16), 0, ui(8) + inset, 0)
 
+    def _schedule_window_state_alignment(self) -> None:
+        """Reflow and align after Qt finishes a window-state transition."""
+        self._window_alignment_token = getattr(self, "_window_alignment_token", 0) + 1
+        token = self._window_alignment_token
+        for delay in (0, 60, 180):
+            QTimer.singleShot(delay, lambda t=token: self._align_window_state(t))
+
+    def _align_window_state(self, token: int) -> None:
+        if token != getattr(self, "_window_alignment_token", -1):
+            return
+        if self._content_mode == "mods" and self._cards_ready_for_reflow:
+            self._reflow_cards()
+        self._sync_content_right_edges()
+
     def _schedule_content_alignment(self, *_args) -> None:
-        if self._content_alignment_pending or not hasattr(self, "scroll"):
+        if (
+            getattr(self, "_suppress_content_alignment", False)
+            or self._content_alignment_pending
+            or not hasattr(self, "scroll")
+        ):
             return
         self._content_alignment_pending = True
         QTimer.singleShot(0, self._sync_content_right_edges)
@@ -2898,7 +3115,7 @@ class MainWindow(QMainWindow):
         for column in range(columns):
             self.cards_layout.setColumnMinimumWidth(column, card_width)
         for index, (_mod_id, card) in enumerate(saved_cards):
-            card.setFixedWidth(card_width)
+            card.set_card_width(card_width)
             card.show()
             self.cards_layout.addWidget(card, index // columns, index % columns, Qt.AlignTop)
         self.content_back_button.hide()
@@ -3769,16 +3986,24 @@ class MainWindow(QMainWindow):
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
+        if hasattr(self, "_size_grip"):
+            self._size_grip.move(
+                self.centralWidget().width() - self._size_grip.width(),
+                self.centralWidget().height() - self._size_grip.height(),
+            )
         if hasattr(self, "_cards_loading_overlay") and self._cards_loading_overlay.isVisible():
             self._cards_loading_overlay.setGeometry(self.scroll.viewport().rect())
         if hasattr(self, "cards_layout"):
             self._schedule_cards_refresh()
-            QTimer.singleShot(0, self._sync_content_right_edges)
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
         self._apply_native_window_corner()
-        QTimer.singleShot(0, self._sync_content_right_edges)
+        # The first show/maximize pass can change the viewport after the
+        # normal resize event. Reflow once more after Qt settles the splitter
+        # and scrollbar geometry so cards and controls share one right edge.
+        self._schedule_cards_refresh()
+        self._schedule_window_state_alignment()
 
     def _apply_native_window_corner(self) -> None:
         """Ask Windows DWM to render smooth native rounded window corners."""

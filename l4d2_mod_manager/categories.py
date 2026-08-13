@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 
 CATEGORIES = [
-    {"id": "all", "label": "所有 (All)", "children": []},
+    {"id": "all", "label": "所有 All", "children": []},
     {
         "id": "survivors",
         "label": "幸存者 (Survivors)",
