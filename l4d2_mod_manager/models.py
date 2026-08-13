@@ -20,6 +20,8 @@ class Mod:
     categories: list[str] = field(default_factory=list)
     files: list[str] = field(default_factory=list)
     active: bool = False
+    favorite: bool = False
+    favorite_at: int = 0
     conflict_with: list[str] = field(default_factory=list)
     steam_loaded: bool = False
     file_size: int = 0

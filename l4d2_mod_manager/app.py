@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 import subprocess
 import ctypes
 import re
@@ -15,7 +16,7 @@ from copy import deepcopy
 from pathlib import Path
 from threading import Event
 
-from PyQt5.QtCore import QEvent, QObject, QRunnable, QSize, QTimer, QUrl, Qt, QThreadPool, pyqtSignal
+from PyQt5.QtCore import QEvent, QObject, QPoint, QRunnable, QSize, QTimer, QUrl, Qt, QThreadPool, pyqtSignal
 from PyQt5.QtGui import QColor, QDesktopServices, QFont, QIcon, QLinearGradient, QPainter, QPixmap
 from PyQt5.QtWidgets import (
     QAction, QApplication, QComboBox, QDialog, QFileDialog, QFrame, QGridLayout,
@@ -46,6 +47,440 @@ PREVIEW_CACHE: dict[str, QPixmap] = {}
 
 def ui(value: int) -> int:
     return max(1, round(value * UI_SCALE))
+
+
+# Active theme (global so programmatically painted widgets can adapt).
+ACTIVE_THEME = "dark"
+
+# Programmatically painted colors per theme. Keys are stable identifiers used
+# by the custom paintEvent/draw code; each theme maps them to concrete colors.
+THEME_PALETTE: dict[str, dict[str, str]] = {
+    "dark": {
+        "surface": "#0a0e16",
+        "panel": "#121826",
+        "panel_border": "#5f83b5",
+        "tree_default": "#687384",
+        "tree_favorite": "#f1c2c7",
+        "tree_expand": "#9fb2ce",
+        "toggle_off_border": "#4a5d78",
+        "toggle_off_fill": "#35445a",
+        "toggle_on_border": "#5b8ced",
+        "toggle_on_fill": "#2d65d6",
+        "toggle_knob": "#f4f8ff",
+        "link": "#79a5ff",
+    },
+    "light": {
+        "surface": "#d9e2f1",
+        "panel": "#f4f8fd",
+        "panel_border": "#7fa6e2",
+        "tree_default": "#8a94a6",
+        "tree_favorite": "#d9646f",
+        "tree_expand": "#5a6a82",
+        "toggle_off_border": "#b9c6d8",
+        "toggle_off_fill": "#c7d3e4",
+        "toggle_on_border": "#7fb0ff",
+        "toggle_on_fill": "#2d65d6",
+        "toggle_knob": "#ffffff",
+        "link": "#2d65d6",
+    },
+}
+
+
+def theme_color(key: str, fallback_theme: str = "dark") -> str:
+    """Look up a programmatic-paint color for the active theme."""
+    palette = THEME_PALETTE.get(ACTIVE_THEME, THEME_PALETTE[fallback_theme])
+    return palette.get(key, THEME_PALETTE[fallback_theme][key])
+
+
+# Ordered list of selectable themes (label shown in the theme switcher).
+THEME_ORDER = ["dark", "light"]
+THEME_LABELS = {
+    "dark": "深渊蓝",
+    "light": "晴空白",
+}
+THEME_HINTS = {
+    "dark": "深渊蓝：深色背景，护眼低亮，适合夜间使用",
+    "light": "晴空白：浅色背景，明亮清晰，适合白天使用",
+}
+
+
+THEMES = {
+    "dark": r"""
+    QWidget { font-family: "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei"; }
+    QMainWindow, QDialog { background: transparent; color: #e8edf5; }
+    #appSurface { background: transparent; border-radius: 14px; }
+    #header { background: transparent; border-bottom: 1px solid #2a3444; border-top-left-radius: 14px; border-top-right-radius: 14px; }
+    #brand { color: #f4f8ff; font-size: 20px; font-weight: 800; letter-spacing: 2px; }
+    #brandButton { color: #f4f8ff; background: transparent; border: 0; padding: 0; font-size: 20px; font-weight: 800; letter-spacing: 2px; text-align: left; }
+    #brandButton:hover { color: #79a5ff; }
+    #brandCredit { color: #8291a8; font-size: 11px; font-weight: 700; }
+    #brandSub, #contentSubtitle { color: #8090a8; font-size: 10px; font-weight: 700; letter-spacing: 1px; }
+    #headerHint { color: #a9bbd5; font-size: 11px; font-weight: 600; padding-right: 8px; }
+    #headerButton, #headerButtonSecondary, #primaryButton, #secondaryButton, #launchButton { background: #273347; color: #d9e4f4; border: 1px solid #38465c; border-radius: 7px; padding: 8px 13px; font-weight: 700; }
+    #headerButton:hover, #headerButtonSecondary:hover, #primaryButton:hover, #secondaryButton:hover, #launchButton:hover { background: #3a5378; color: white; border: 2px solid #6aa0ff; }
+    #headerIconButton { background: #202c40; border: 0; border-radius: 7px; padding: 0; }
+    #headerIconButton:hover { background: #2d65d6; border: 0; }
+    QToolTip { color: #eaf2ff; background: #202b3b; border: 1px solid #40516a; border-radius: 5px; padding: 5px 8px; }
+    #launchButton:disabled { color: #6a7689; background: #1c2636; border-color: #2a3548; }
+    #totalModCount, #activeModCount { background: transparent; border: 0; padding: 0; font-weight: 700; }
+    #totalModCount { color: #75a7ff; }
+    #activeModCount { color: #48d89a; }
+    #totalModCount:hover, #activeModCount:hover { text-decoration: underline; }
+    #totalModCount[selected="true"] { border: 1px solid #75a7ff; border-radius: 6px; padding: 3px 6px; }
+    #activeModCount[selected="true"] { border: 1px solid #48d89a; border-radius: 6px; padding: 3px 6px; }
+    #launchButton { background: #273347; color: #d9e4f4; border: 1px solid #38465c; border-radius: 7px; padding: 8px 13px; font-weight: 700; }
+    #launchButton:hover { background: #3a5378; color: white; border: 2px solid #6aa0ff; }
+    #launchButton:disabled { color: #6a7689; background: #1c2636; border-color: #2a3548; }
+    #sidebar { background: transparent; border-right: 1px solid #283242; }
+    #sectionLabel { color: #94a4bc; font-size: 11px; font-weight: 800; letter-spacing: 1px; }
+    #categorySwitchLabel { color: #91a0b4; font-size: 11px; font-weight: 700; }
+    #sideHint { color: #718097; font-size: 11px; line-height: 1.45; padding: 10px; background: #1c2533; border-radius: 7px; }
+    QTreeWidget { background: transparent; border: 0; color: #b8c4d5; outline: none; font-size: 13px; }
+    QTreeWidget::item { min-height: 24px; border-radius: 6px; padding: 2px 6px; }
+    QTreeWidget::item:hover { background: #212b3a; color: #f2f6fc; }
+    QTreeWidget::item:selected { background: #2b5fca; color: white; font-weight: 700; }
+    QScrollArea { border: 0; background: transparent; }
+    #cardsScroll, #cardsViewport, #cardsHost { background: transparent; }
+    #cardsLoadingOverlay { background: rgba(10, 15, 24, 80); }
+    #cardsLoadingPanel { background: #18212e; border: 2px solid #5486ec; border-radius: 12px; }
+    #cardsLoadingSpinner { color: #78a8ff; font-size: 30px; font-weight: 700; }
+    #cardsLoadingLabel { color: #c4d5ee; font-size: 13px; font-weight: 700; }
+    QScrollBar:vertical { background: #10151e; width: 8px; margin: 5px 0 5px 0; border-radius: 4px; }
+    QScrollBar::handle:vertical { background: #273242; min-height: 42px; border-radius: 4px; }
+    QScrollBar::handle:vertical:hover { background: #3a4a60; }
+    QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
+    QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }
+    QScrollBar:horizontal { background: #10151e; height: 8px; margin: 0 4px 3px 4px; border-radius: 4px; }
+    QScrollBar::handle:horizontal { background: #273242; min-width: 42px; border-radius: 4px; }
+    QScrollBar::handle:horizontal:hover { background: #3a4a60; }
+    QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; }
+    QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal { background: transparent; }
+    #contentTitle { color: #f1f5fb; font-size: 22px; font-weight: 800; }
+    QLineEdit, QComboBox { min-height: 32px; background: #19212e; color: #e6edf7; border: 1px solid #2c384a; border-radius: 7px; padding: 0 11px; }
+    QLineEdit:focus, QComboBox:focus { border-color: #5486ec; background: #1b2534; }
+    #searchInput { min-width: 235px; }
+    #collectionCombo { padding-left: 12px; padding-right: 30px; font-weight: 600; }
+    #collectionCombo QLineEdit { background: transparent; border: 0; padding: 0; color: #e6edf7; font-weight: 600; }
+    #collectionCombo:hover { background: #202b3c; border-color: #3b506e; }
+    #collectionCombo::drop-down { subcontrol-origin: padding; subcontrol-position: top right; border: 0; width: 30px; }
+    #collectionComboMenu { background: #18212e; color: #dfe9f8; border: 1px solid #3a4a61; border-radius: 8px; outline: 0; padding: 5px; selection-background-color: transparent; }
+    #collectionComboMenu::item { min-height: 25px; border: 1px solid transparent; border-radius: 6px; padding: 0 12px; margin: 1px 0; }
+    #collectionComboMenu::item:hover { background: #25344a; border-color: #3a5272; color: #ffffff; }
+    #collectionComboMenu::item:selected { background: #2d65d6; border-color: #4d83eb; color: #ffffff; font-weight: 700; }
+    #collectionComboMenu QScrollBar:vertical { background: transparent; width: 7px; margin: 7px 3px 7px 0; }
+    #collectionComboMenu QScrollBar::handle:vertical { background: #3a4b63; min-height: 30px; border-radius: 3px; }
+    #collectionComboMenu QScrollBar::handle:vertical:hover { background: #50709a; }
+    #modCard, #modCardActive, #modCardConflict { background: #18202c; border: 1px solid #293649; border-radius: 10px; }
+    #modCard:hover { background: #1c2634; border: 2px solid #6aa0ff; }
+    #modCardActive { border: 2px solid #23c987; background: #12362e; }
+    #modCardActive:hover { background: #174538; border: 2px solid #55efad; }
+    #modCardConflict { border: 2px solid #ff4757; background: #481923; }
+    #modCardConflict:hover { background: #5a1d29; border: 2px solid #ff7885; }
+    #modCard[favorite="true"], #modCardActive[favorite="true"], #modCardConflict[favorite="true"] {
+        border: 2px solid #f04455;
+    }
+    #modCard[favorite="true"]:hover, #modCardActive[favorite="true"]:hover, #modCardConflict[favorite="true"]:hover {
+        border: 2px solid #ff5a66;
+    }
+    #preview { background: #111821; border-radius: 7px; min-height: 112px; max-height: 112px; }
+    #cardTitle { color: #f2f6fc; font-size: 13px; font-weight: 700; line-height: 1.32; }
+    #cardMeta { color: #91a0b4; font-size: 10px; }
+    #typeSummary { color: #91a0b4; font-size: 9px; font-weight: 600; padding: 0; }
+    #tag, #tagButton { min-height: 20px; max-height: 20px; color: #ffffff; border-radius: 4px; padding: 0 6px; font-size: 9px; font-weight: 700; }
+    #cardAction, #cardActionActive { min-height: 24px; max-height: 24px; border-radius: 6px; font-size: 11px; font-weight: 700; }
+    #cardAction { color: #cbd7e8; background: #253247; border: 1px solid #34445c; }
+    #cardAction:hover { color: white; background: #3c78ee; border: 2px solid #5b8ced; }
+    #cardActionActive { color: #d2ffeb; background: #167453; border: 1px solid #2be39a; }
+    #cardActionActive:hover { color: white; background: #cf4a55; border: 2px solid #ff7885; }
+    #tagButton { border: 0; }
+    #tagButton:hover { border: 1px solid #d8e7ff; padding: 0 5px; }
+    #favoriteStar { background: transparent; border: none; color: #6c7c93; font-size: 18px; font-weight: 700; padding: 0; }
+    #favoriteStar:hover { color: #ff5a6a; }
+    #favoriteStar:checked { color: #ff3b4d; text-shadow: 0 0 8px rgba(240, 68, 85, 0.9); }
+    #emptyText { color: #9db2d0; background: transparent; border: 0; padding: 0; font-size: 15px; font-weight: 500; line-height: 1.7; letter-spacing: 0.5px; }
+    #paginationBar { min-height: 22px; }
+    #paginationButton { min-height: 0; max-height: 22px; color: #cbd7e8; background: #253247; border: 1px solid #34445c; border-radius: 5px; padding: 0 9px; font-size: 11px; }
+    #paginationButton:hover { color: white; background: #2d65d6; border-color: #2d65d6; }
+    #paginationButton:disabled { color: #687384; background: #1b222d; border-color: #2d3747; }
+    #pageLabel { color: #91a0b4; min-width: 64px; font-size: 11px; qproperty-alignment: AlignCenter; }
+    #steamSyncStatus { background: #1b2a3d; border: 1px solid #355577; border-radius: 7px; }
+    #steamSyncLabel { color: #bcd7ff; font-size: 11px; font-weight: 700; }
+    #steamSyncProgress { min-height: 6px; max-height: 6px; border: 0; border-radius: 3px; background: #263a54; }
+    #steamSyncProgress::chunk { border-radius: 3px; background: #4c86eb; }
+    #footer { background: transparent; border-top: 1px solid #283242; border-bottom-left-radius: 14px; border-bottom-right-radius: 14px; }
+    #footer QLabel { color: #9eacc0; padding-right: 12px; }
+    #conflictButton { color: #ffabab; background: transparent; border: 0; font-weight: 700; }
+    #conflictButton:hover { text-decoration: underline; }
+    #conflictButton:disabled { color: #718097; }
+    #conflictButton[selected="true"] { border: 1px solid #ff8f99; border-radius: 6px; padding: 3px 6px; }
+    #closeButton { min-width: 30px; max-width: 30px; min-height: 30px; max-height: 30px; padding: 0; border: 0; color: #92a1b6; background: transparent; font-size: 18px; font-weight: 800; }
+    #closeButton:hover { color: #ff7a85; background: transparent; }
+    #windowControlButton { padding: 0; border: 0; color: #92a1b6; background: transparent; font-size: 16px; font-weight: 700; }
+    #windowControlButton:hover { color: #f3f7ff; background: #29364a; border-radius: 5px; }
+    #dialogHeader { background: #1b2432; border-bottom: 1px solid #2d3a4d; border-top-left-radius: 14px; border-top-right-radius: 14px; }
+    #dialogTitle { color: #f1f5fb; font-size: 17px; font-weight: 800; }
+    #modDetailsContent { background: #151d29; border-bottom-left-radius: 14px; border-bottom-right-radius: 14px; }
+    #modDetailsTitle { color: #f4f8ff; font-size: 16px; font-weight: 800; }
+    #modDetailsKey { color: #8ca4c6; font-size: 11px; font-weight: 700; }
+    #modDetailsValue { color: #e2ebf8; font-size: 11px; }
+    #modDetailsDescription { color: #b9c7d9; background: #111822; border: 1px solid #29384d; border-radius: 7px; padding: 9px; font-size: 11px; }
+    #contentBackButton { color: #aebfd6; background: transparent; border: 0; padding: 0; }
+    #contentBackButton:hover { color: #ffffff; background: rgba(73, 103, 145, 120); border-radius: 5px; }
+    #mainDetailsHost, #mainConflictHost { background: transparent; }
+    #mainDetailsPreview { background: #111821; border: 1px solid #29384d; border-radius: 9px; }
+    #mainDetailsTitle { color: #f3f7fd; font-size: 18px; font-weight: 800; }
+    #mainDetailsField { color: #b6c6da; font-size: 12px; padding: 2px 0; }
+    #mainDetailsDescription { color: #cad6e7; background: rgba(17, 24, 34, 220); border: 1px solid #29384d; border-radius: 8px; padding: 12px; font-size: 12px; line-height: 1.55; }
+    #steamDetailsLink { min-height: 28px; color: #dceaff; background: #285b9d; border: 1px solid #4b82c8; border-radius: 6px; padding: 0 10px; font-size: 11px; font-weight: 700; }
+    #steamDetailsLink:hover { background: #3470bc; color: white; }
+    #mainConflictGroup { background: rgba(28, 31, 43, 235); border: 1px solid #a54c5a; border-radius: 10px; }
+    #mainConflictGroupTitle { color: #ffc0c7; font-size: 12px; font-weight: 800; }
+    #mainConflictGroupReason { color: #d4e1f3; background: #202c3d; border: 1px solid #3e506a; border-radius: 5px; padding: 5px 7px; font-size: 10px; }
+    #dialogSubtitle { color: #8596af; font-size: 11px; }
+    #aboutContent { background: #121924; border-bottom-left-radius: 14px; border-bottom-right-radius: 14px; }
+    #aboutBrand { color: #f1f5fb; font-size: 25px; font-weight: 800; letter-spacing: 2px; }
+    #aboutVersion { color: #7698d9; font-size: 12px; font-weight: 700; }
+    #aboutDesigner { color: #aebbd0; font-size: 12px; font-weight: 500; padding: 2px 0; background: transparent; border: 0; }
+    #aboutDescription { color: #9eacc0; font-size: 12px; line-height: 1.55; }
+    #conflictBody { background: #10141c; border: 0; border-bottom-left-radius: 14px; border-bottom-right-radius: 14px; }
+    #conflictScroll { background: transparent; border: 0; }
+    #conflictViewport { background: #10141c; border: 0; border-bottom-left-radius: 14px; border-bottom-right-radius: 14px; }
+    #conflictHost { background: transparent; border: 0; }
+    #groupCardScroll, #groupCardsHost { background: #151d29; border: 0; border-radius: 7px; }
+    #conflictGroup { background: #151d29; border: 1px solid #303b4d; border-radius: 10px; }
+    #conflictGroupLabel { color: #e99aa2; font-size: 11px; font-weight: 800; letter-spacing: 1px; }
+    #conflictCard { background: #20202b; border: 1px solid #6d404b; border-radius: 10px; }
+    #conflictCard:hover { background: #282333; border-color: #b85866; }
+    #conflictCountBadge { color: #fff4f5; background: #b84752; border: 1px solid #ef7d87; border-radius: 12px; font-size: 11px; font-weight: 800; }
+    #conflictPreview { background: #111821; border-radius: 7px; min-height: 104px; max-height: 104px; }
+    #conflictCaption { color: #f08b96; font-size: 11px; font-weight: 700; }
+    #conflictMeta { color: #aebbd0; font-size: 9px; }
+    #conflictPeers { color: #abb8c9; font-size: 11px; }
+    #conflictPeerButton { max-height: 28px; color: #ffd3d7; background: #3c2730; border: 1px solid #754551; border-radius: 6px; padding: 0 9px; font-size: 11px; font-weight: 700; }
+    #conflictPeerButton:hover { color: white; background: #c94a54; border-color: #e26770; }
+    #promptSurface { background: #18212e; border: 1px solid #3a4a61; border-radius: 12px; }
+    #promptText { color: #e5edf9; font-size: 13px; line-height: 1.5; }
+    #promptIconInfo, #promptIconWarning, #promptIconError { color: white; border-radius: 15px; font-size: 16px; font-weight: 800; }
+    #promptIconInfo { background: #2d65d6; border: 1px solid #5b8ced; }
+    #promptIconWarning { background: #a66d24; border: 1px solid #e5a34a; }
+    #promptIconError { background: #a93f4c; border: 1px solid #ed7681; }
+    #promptInput { min-height: 34px; background: #111a26; color: #eef5ff; border: 1px solid #3a4a61; border-radius: 7px; padding: 0 10px; }
+    #promptInput:focus { background: #162131; border-color: #5486ec; }
+    #promptPrimaryButton, #promptSecondaryButton { min-height: 32px; border-radius: 6px; padding: 0 15px; font-weight: 700; }
+    #promptPrimaryButton { background: #2d65d6; color: white; border: 1px solid #3d78e7; }
+    #promptPrimaryButton:hover { background: #3c78ee; border-color: #6297f3; }
+    #promptSecondaryButton { background: #253247; color: #cfdbeb; border: 1px solid #3b4b62; }
+    #promptSecondaryButton:hover { background: #30415a; border-color: #526882; }
+    QToolTip { background: #202c3d; color: #e9f1ff; border: 1px solid #496282; border-radius: 5px; padding: 6px 8px; font-size: 11px; }
+    QMenu { background: #18212e; color: #dfe9f8; border: 1px solid #3a4a61; border-radius: 8px; padding: 5px; }
+    QMenu::item { min-height: 29px; border-radius: 5px; padding: 0 26px 0 11px; margin: 1px 0; }
+    QMenu::item:selected { background: #2d65d6; color: white; }
+    QMenu::item:disabled { color: #718097; background: transparent; }
+    QMenu::separator { height: 1px; background: #304057; margin: 5px 8px; }
+    QMenu::right-arrow { width: 8px; height: 8px; }
+    QMessageBox, QInputDialog, QFileDialog { background: #18212e; color: #e8edf5; }
+    QMessageBox QLabel, QInputDialog QLabel, QFileDialog QLabel { color: #dce6f5; }
+    QMessageBox QLabel#qt_msgbox_label { min-width: 280px; line-height: 1.45; }
+    QMessageBox QPushButton, QInputDialog QPushButton, QFileDialog QPushButton { min-height: 30px; background: #2d65d6; color: white; border: 1px solid #3d78e7; border-radius: 6px; padding: 0 14px; font-weight: 700; }
+    QMessageBox QPushButton:hover, QInputDialog QPushButton:hover, QFileDialog QPushButton:hover { background: #3c78ee; border-color: #6297f3; }
+    QMessageBox QPushButton:pressed, QInputDialog QPushButton:pressed, QFileDialog QPushButton:pressed { background: #2455b9; }
+    QMessageBox QPushButton[text="取消"], QMessageBox QPushButton[text="否"], QInputDialog QPushButton[text="取消"], QFileDialog QPushButton[text="取消"] { background: #253247; border-color: #3b4b62; color: #cfdbeb; }
+    QMessageBox QPushButton[text="取消"]:hover, QMessageBox QPushButton[text="否"]:hover, QInputDialog QPushButton[text="取消"]:hover, QFileDialog QPushButton[text="取消"]:hover { background: #30415a; border-color: #526882; }
+    QInputDialog QLineEdit, QFileDialog QLineEdit { min-height: 30px; background: #121a25; color: #edf4ff; border: 1px solid #3a4a61; border-radius: 6px; padding: 0 9px; }
+    QInputDialog QLineEdit:focus, QFileDialog QLineEdit:focus { border-color: #5486ec; background: #162131; }
+    QFileDialog QTreeView, QFileDialog QListView, QFileDialog QSidebar { background: #121a25; color: #dce6f5; border: 1px solid #303e53; outline: 0; }
+    QFileDialog QTreeView::item, QFileDialog QListView::item, QFileDialog QSidebar::item { min-height: 27px; padding: 2px 7px; }
+    QFileDialog QTreeView::item:selected, QFileDialog QListView::item:selected, QFileDialog QSidebar::item:selected { background: #2d65d6; color: white; }
+    QFileDialog QComboBox { min-height: 28px; }
+    QStatusBar { background: #151b26; color: #91a0b4; border-top: 1px solid #283242; }
+""",
+    "light": r"""
+    QWidget { font-family: "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei"; }
+    QMainWindow, QDialog { background: transparent; color: #24334c; }
+    #appSurface { background: transparent; border-radius: 14px; }
+    #header { background: transparent; border-bottom: 1px solid #b3c0d4; border-top-left-radius: 14px; border-top-right-radius: 14px; }
+    #brand { color: #1f2c44; font-size: 20px; font-weight: 800; letter-spacing: 2px; }
+    #brandButton { color: #1f2c44; background: transparent; border: 0; padding: 0; font-size: 20px; font-weight: 800; letter-spacing: 2px; text-align: left; }
+    #brandButton:hover { color: #2d65d6; }
+    #brandCredit { color: #6b7a93; font-size: 11px; font-weight: 700; }
+    #brandSub, #contentSubtitle { color: #5d6c85; font-size: 10px; font-weight: 700; letter-spacing: 1px; }
+    #headerHint { color: #4c5d78; font-size: 11px; font-weight: 600; padding-right: 8px; }
+    #headerButton, #headerButtonSecondary, #primaryButton, #secondaryButton, #launchButton { background: #edf1f9; color: #24334c; border: 1px solid #aab6c8; border-radius: 7px; padding: 8px 13px; font-weight: 700; }
+    #headerButton:hover, #headerButtonSecondary:hover, #primaryButton:hover, #secondaryButton:hover, #launchButton:hover { background: #ffffff; color: #0b2a52; border: 2px solid #4d83eb; }
+    #headerIconButton { background: #e4e9f2; border: 0; border-radius: 7px; padding: 0; }
+    #headerIconButton:hover { background: #2d65d6; border: 0; }
+    QToolTip { color: #22334e; background: #ffffff; border: 1px solid #c6d2e2; border-radius: 5px; padding: 5px 8px; }
+
+    #totalModCount, #activeModCount { background: transparent; border: 0; padding: 0; font-weight: 700; }
+    #totalModCount { color: #2b5fd0; }
+    #activeModCount { color: #0f9e6b; }
+    #totalModCount:hover, #activeModCount:hover { text-decoration: underline; }
+    #totalModCount[selected="true"] { border: 1px solid #2b5fd0; border-radius: 6px; padding: 3px 6px; }
+    #activeModCount[selected="true"] { border: 1px solid #0f9e6b; border-radius: 6px; padding: 3px 6px; }
+    #launchButton:disabled { color: #9aa7b8; background: #eef1f6; border-color: #d8dee8; }
+    #sidebar { background: transparent; border-right: 1px solid #b3c0d4; }
+    #sectionLabel { color: #64748e; font-size: 11px; font-weight: 800; letter-spacing: 1px; }
+    #categorySwitchLabel { color: #5c6c86; font-size: 11px; font-weight: 700; }
+    #sideHint { color: #5c6b83; font-size: 11px; line-height: 1.45; padding: 10px; background: #e9eef7; border-radius: 7px; }
+    QTreeWidget { background: transparent; border: 0; color: #3c4c66; outline: none; font-size: 13px; }
+    QTreeWidget::item { min-height: 24px; border-radius: 6px; padding: 2px 6px; }
+    QTreeWidget::item:hover { background: #e2e9f7; color: #1c2f4e; }
+    QTreeWidget::item:selected { background: #91b9ee; color: #1f4fa3; font-weight: 700; }
+    QScrollArea { border: 0; background: transparent; }
+    #cardsScroll, #cardsViewport, #cardsHost { background: transparent; }
+    #cardsLoadingOverlay { background: rgba(240, 244, 250, 90); }
+    #cardsLoadingPanel { background: #ffffff; border: 2px solid #5486ec; border-radius: 12px; }
+    #cardsLoadingSpinner { color: #2d65d6; font-size: 30px; font-weight: 700; }
+    #cardsLoadingLabel { color: #43536e; font-size: 13px; font-weight: 700; }
+    QScrollBar:vertical { background: #dfe5ef; width: 8px; margin: 5px 0 5px 0; border-radius: 4px; }
+    QScrollBar::handle:vertical { background: #c2cde0; min-height: 42px; border-radius: 4px; }
+    QScrollBar::handle:vertical:hover { background: #9fb0cc; }
+    QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
+    QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }
+    QScrollBar:horizontal { background: #dfe5ef; height: 8px; margin: 0 4px 3px 4px; border-radius: 4px; }
+    QScrollBar::handle:horizontal { background: #c2cde0; min-width: 42px; border-radius: 4px; }
+    QScrollBar::handle:horizontal:hover { background: #9fb0cc; }
+    QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; }
+    QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal { background: transparent; }
+    #contentTitle { color: #1c2a43; font-size: 22px; font-weight: 800; }
+    QLineEdit, QComboBox { min-height: 32px; background: #ffffff; color: #1d2b43; border: 1px solid #aab6c8; border-radius: 7px; padding: 0 11px; }
+    QLineEdit:focus, QComboBox:focus { border-color: #2d65d6; background: #ffffff; }
+    #searchInput { min-width: 235px; }
+    #collectionCombo { padding-left: 12px; padding-right: 30px; font-weight: 600; }
+    #collectionCombo QLineEdit { background: transparent; border: 0; padding: 0; color: #1d2b43; font-weight: 600; }
+    #collectionCombo:hover { background: #f2f5fb; border-color: #9db6dc; }
+    #collectionCombo::drop-down { subcontrol-origin: padding; subcontrol-position: top right; border: 0; width: 30px; }
+    #collectionComboMenu { background: #ffffff; color: #22334e; border: 1px solid #aab6c8; border-radius: 8px; outline: 0; padding: 5px; selection-background-color: transparent; }
+    #collectionComboMenu::item { min-height: 25px; border: 1px solid transparent; border-radius: 6px; padding: 0 12px; margin: 1px 0; }
+    #collectionComboMenu::item:hover { background: #e6edf9; border-color: #a9c1e8; color: #173a6d; }
+    #collectionComboMenu::item:selected { background: #2d65d6; border-color: #4d83eb; color: #ffffff; font-weight: 700; }
+    #collectionComboMenu QScrollBar:vertical { background: transparent; width: 7px; margin: 7px 3px 7px 0; }
+    #collectionComboMenu QScrollBar::handle:vertical { background: #c2cde0; min-height: 30px; border-radius: 3px; }
+    #collectionComboMenu QScrollBar::handle:vertical:hover { background: #a3b4d1; }
+    #modCard, #modCardActive, #modCardConflict { background: rgba(244, 247, 251, 250); border: 1px solid #9aa7ba; border-radius: 10px; }
+    #modCard:hover { background: #ffffff; border: 2px solid #4d83eb; }
+    #modCardActive { border: 2px solid #1c4fd0; background: rgba(201, 223, 252, 255); }
+    #modCardActive:hover { background: #b9d4fb; border: 2px solid #143da8; }
+    #modCardConflict { border: 2px solid #d8363f; background: rgba(250, 211, 216, 255); }
+    #modCardConflict:hover { background: #f8c6cc; border: 2px solid #c52832; }
+    #modCard[favorite="true"], #modCardActive[favorite="true"], #modCardConflict[favorite="true"] {
+        border: 2px solid #d8363f;
+    }
+    #modCard[favorite="true"]:hover, #modCardActive[favorite="true"]:hover, #modCardConflict[favorite="true"]:hover {
+        border: 2px solid #ff4757;
+    }
+    #preview { background: #eef2f8; border-radius: 7px; min-height: 112px; max-height: 112px; }
+    #cardTitle { color: #1d2b43; font-size: 13px; font-weight: 700; line-height: 1.32; }
+    #cardMeta { color: #66748c; font-size: 10px; }
+    #typeSummary { color: #66748c; font-size: 9px; font-weight: 600; padding: 0; }
+    #tag, #tagButton { min-height: 20px; max-height: 20px; color: #ffffff; border-radius: 4px; padding: 0 6px; font-size: 9px; font-weight: 700; }
+    #cardAction, #cardActionActive { min-height: 24px; max-height: 24px; border-radius: 6px; font-size: 11px; font-weight: 700; }
+    #cardAction { color: #3c4e6b; background: #e9eef7; border: 1px solid #aab6c8; }
+    #cardAction:hover { color: white; background: #3c78ee; border: 2px solid #2d65d6; }
+    #cardActionActive { color: #0b7a56; background: #d9f5ea; border: 1px solid #2be39a; }
+    #cardActionActive:hover { color: white; background: #cf4a55; border: 2px solid #b84752; }
+    #tagButton { border: 0; }
+    #tagButton:hover { border: 1px solid #7fa6e2; padding: 0 5px; }
+    #favoriteStar { background: transparent; border: none; color: #b3bccb; font-size: 18px; font-weight: 700; padding: 0; }
+    #favoriteStar:hover { color: #ff5a6a; }
+    #favoriteStar:checked { color: #ff3b4d; text-shadow: 0 0 8px rgba(240, 68, 85, 0.85); }
+    #emptyText { color: #5f718e; background: transparent; border: 0; padding: 0; font-size: 15px; font-weight: 500; line-height: 1.7; letter-spacing: 0.5px; }
+    #paginationBar { min-height: 22px; }
+    #paginationButton { min-height: 0; max-height: 22px; color: #3c4e6b; background: #e9eef7; border: 1px solid #aab6c8; border-radius: 5px; padding: 0 9px; font-size: 11px; }
+    #paginationButton:hover { color: white; background: #2d65d6; border-color: #2d65d6; }
+    #paginationButton:disabled { color: #98a5b8; background: #eef1f6; border-color: #d8dee8; }
+    #pageLabel { color: #66748c; min-width: 64px; font-size: 11px; qproperty-alignment: AlignCenter; }
+    #steamSyncStatus { background: #e8f0fc; border: 1px solid #9db6d6; border-radius: 7px; }
+    #steamSyncLabel { color: #2b5bb8; font-size: 11px; font-weight: 700; }
+    #steamSyncProgress { min-height: 6px; max-height: 6px; border: 0; border-radius: 3px; background: #d6e2f5; }
+    #steamSyncProgress::chunk { border-radius: 3px; background: #4c86eb; }
+    #footer { background: transparent; border-top: 1px solid #9aa7ba; border-bottom-left-radius: 14px; border-bottom-right-radius: 14px; }
+    #footer QLabel { color: #64738b; padding-right: 12px; }
+    #conflictButton { color: #d3404d; background: transparent; border: 0; font-weight: 700; }
+    #conflictButton:hover { text-decoration: underline; }
+    #conflictButton:disabled { color: #9aa7ba; }
+    #conflictButton[selected="true"] { border: 1px solid #f07a85; border-radius: 6px; padding: 3px 6px; }
+    #closeButton { min-width: 30px; max-width: 30px; min-height: 30px; max-height: 30px; padding: 0; border: 0; color: #7b8aa1; background: transparent; font-size: 18px; font-weight: 800; }
+    #closeButton:hover { color: #ff7a85; background: transparent; }
+    #windowControlButton { padding: 0; border: 0; color: #7b8aa1; background: transparent; font-size: 16px; font-weight: 700; }
+    #windowControlButton:hover { color: #22334e; background: #dde5f1; border-radius: 5px; }
+    #dialogHeader { background: #f0f4fa; border-bottom: 1px solid #b3c0d4; border-top-left-radius: 14px; border-top-right-radius: 14px; }
+    #dialogTitle { color: #1c2a43; font-size: 17px; font-weight: 800; }
+    #modDetailsContent { background: #ffffff; border-bottom-left-radius: 14px; border-bottom-right-radius: 14px; }
+    #modDetailsTitle { color: #1c2a43; font-size: 16px; font-weight: 800; }
+    #modDetailsKey { color: #5f7594; font-size: 11px; font-weight: 700; }
+    #modDetailsValue { color: #2a3a54; font-size: 11px; }
+    #modDetailsDescription { color: #40506a; background: #f3f6fb; border: 1px solid #b3c0d4; border-radius: 7px; padding: 9px; font-size: 11px; }
+    #contentBackButton { color: #5f6f88; background: transparent; border: 0; padding: 0; }
+    #contentBackButton:hover { color: #173a6d; background: rgba(45, 101, 214, 30); border-radius: 5px; }
+    #mainDetailsHost, #mainConflictHost { background: transparent; }
+    #mainDetailsPreview { background: #eef2f8; border: 1px solid #b3c0d4; border-radius: 9px; }
+    #mainDetailsTitle { color: #1c2a43; font-size: 18px; font-weight: 800; }
+    #mainDetailsField { color: #42536d; font-size: 12px; padding: 2px 0; }
+    #mainDetailsDescription { color: #3f4f69; background: #f3f6fb; border: 1px solid #b3c0d4; border-radius: 8px; padding: 12px; font-size: 12px; line-height: 1.55; }
+    #steamDetailsLink { min-height: 28px; color: #ffffff; background: #285b9d; border: 1px solid #4b82c8; border-radius: 6px; padding: 0 10px; font-size: 11px; font-weight: 700; }
+    #steamDetailsLink:hover { background: #3470bc; color: white; }
+    #mainConflictGroup { background: rgba(255, 250, 251, 242); border: 1px solid #e0a3ab; border-radius: 10px; }
+    #mainConflictGroupTitle { color: #c24552; font-size: 12px; font-weight: 800; }
+    #mainConflictGroupReason { color: #4a5a73; background: #fbeef0; border: 1px solid #e5b4bb; border-radius: 5px; padding: 5px 7px; font-size: 10px; }
+    #dialogSubtitle { color: #64748e; font-size: 11px; }
+    #aboutContent { background: #ffffff; border-bottom-left-radius: 14px; border-bottom-right-radius: 14px; }
+    #aboutBrand { color: #1c2a43; font-size: 25px; font-weight: 800; letter-spacing: 2px; }
+    #aboutVersion { color: #2b5fd0; font-size: 12px; font-weight: 700; }
+    #aboutDesigner { color: #5d6d87; font-size: 12px; font-weight: 500; padding: 2px 0; background: transparent; border: 0; }
+    #aboutDescription { color: #5d6c85; font-size: 12px; line-height: 1.55; }
+    #conflictBody { background: #ffffff; border: 0; border-bottom-left-radius: 14px; border-bottom-right-radius: 14px; }
+    #conflictScroll { background: transparent; border: 0; }
+    #conflictViewport { background: #ffffff; border: 0; border-bottom-left-radius: 14px; border-bottom-right-radius: 14px; }
+    #conflictHost { background: transparent; border: 0; }
+    #groupCardScroll, #groupCardsHost { background: #f3f6fb; border: 0; border-radius: 7px; }
+    #conflictGroup { background: #ffffff; border: 1px solid #b3c0d4; border-radius: 10px; }
+    #conflictGroupLabel { color: #c24552; font-size: 11px; font-weight: 800; letter-spacing: 1px; }
+    #conflictCard { background: #fff5f6; border: 1px solid #e2a9b1; border-radius: 10px; }
+    #conflictCard:hover { background: #ffecef; border-color: #ef7a86; }
+    #conflictCountBadge { color: #fff4f5; background: #b84752; border: 1px solid #ef7d87; border-radius: 12px; font-size: 11px; font-weight: 800; }
+    #conflictPreview { background: #eef2f8; border-radius: 7px; min-height: 104px; max-height: 104px; }
+    #conflictCaption { color: #c04a56; font-size: 11px; font-weight: 700; }
+    #conflictMeta { color: #64748c; font-size: 9px; }
+    #conflictPeers { color: #4a5a72; font-size: 11px; }
+    #conflictPeerButton { max-height: 28px; color: #9c3440; background: #fbe4e7; border: 1px solid #eba8b0; border-radius: 6px; padding: 0 9px; font-size: 11px; font-weight: 700; }
+    #conflictPeerButton:hover { color: white; background: #c94a54; border-color: #e26770; }
+    #promptSurface { background: #ffffff; border: 1px solid #aab6c8; border-radius: 12px; }
+    #promptText { color: #2a3a54; font-size: 13px; line-height: 1.5; }
+    #promptIconInfo, #promptIconWarning, #promptIconError { color: white; border-radius: 15px; font-size: 16px; font-weight: 800; }
+    #promptIconInfo { background: #2d65d6; border: 1px solid #5b8ced; }
+    #promptIconWarning { background: #a66d24; border: 1px solid #e5a34a; }
+    #promptIconError { background: #a93f4c; border: 1px solid #ed7681; }
+    #promptInput { min-height: 34px; background: #ffffff; color: #1d2b43; border: 1px solid #aab6c8; border-radius: 7px; padding: 0 10px; }
+    #promptInput:focus { background: #ffffff; border-color: #2d65d6; }
+    #promptPrimaryButton, #promptSecondaryButton { min-height: 32px; border-radius: 6px; padding: 0 15px; font-weight: 700; }
+    #promptPrimaryButton { background: #2d65d6; color: white; border: 1px solid #3d78e7; }
+    #promptPrimaryButton:hover { background: #3c78ee; border-color: #6297f3; }
+    #promptSecondaryButton { background: #e9eef7; color: #34455f; border: 1px solid #aab6c8; }
+    #promptSecondaryButton:hover { background: #ffffff; border-color: #9db6dc; }
+    QToolTip { background: #ffffff; color: #22334e; border: 1px solid #c6d2e2; border-radius: 5px; padding: 6px 8px; font-size: 11px; }
+    QMenu { background: #ffffff; color: #22334e; border: 1px solid #aab6c8; border-radius: 8px; padding: 5px; }
+    QMenu::item { min-height: 29px; border-radius: 5px; padding: 0 26px 0 11px; margin: 1px 0; }
+    QMenu::item:selected { background: #2d65d6; color: white; }
+    QMenu::item:disabled { color: #9aa7ba; background: transparent; }
+    QMenu::separator { height: 1px; background: #c6d0de; margin: 5px 8px; }
+    QMenu::right-arrow { width: 8px; height: 8px; }
+    QMessageBox, QInputDialog, QFileDialog { background: #ffffff; color: #22334e; }
+    QMessageBox QLabel, QInputDialog QLabel, QFileDialog QLabel { color: #2c3c56; }
+    QMessageBox QLabel#qt_msgbox_label { min-width: 280px; line-height: 1.45; }
+    QMessageBox QPushButton, QInputDialog QPushButton, QFileDialog QPushButton { min-height: 30px; background: #2d65d6; color: white; border: 1px solid #3d78e7; border-radius: 6px; padding: 0 14px; font-weight: 700; }
+    QMessageBox QPushButton:hover, QInputDialog QPushButton:hover, QFileDialog QPushButton:hover { background: #3c78ee; border-color: #6297f3; }
+    QMessageBox QPushButton:pressed, QInputDialog QPushButton:pressed, QFileDialog QPushButton:pressed { background: #2455b9; }
+    QMessageBox QPushButton[text="取消"], QMessageBox QPushButton[text="否"], QInputDialog QPushButton[text="取消"], QFileDialog QPushButton[text="取消"] { background: #e9eef7; border-color: #aab6c8; color: #34455f; }
+    QMessageBox QPushButton[text="取消"]:hover, QMessageBox QPushButton[text="否"]:hover, QInputDialog QPushButton[text="取消"]:hover, QFileDialog QPushButton[text="取消"]:hover { background: #ffffff; border-color: #9db6dc; }
+    QInputDialog QLineEdit, QFileDialog QLineEdit { min-height: 30px; background: #ffffff; color: #1d2b43; border: 1px solid #aab6c8; border-radius: 6px; padding: 0 9px; }
+    QInputDialog QLineEdit:focus, QFileDialog QLineEdit:focus { border-color: #2d65d6; background: #ffffff; }
+    QFileDialog QTreeView, QFileDialog QListView, QFileDialog QSidebar { background: #f5f7fb; color: #2c3c56; border: 1px solid #b3c0d4; outline: 0; }
+    QFileDialog QTreeView::item, QFileDialog QListView::item, QFileDialog QSidebar::item { min-height: 27px; padding: 2px 7px; }
+    QFileDialog QTreeView::item:selected, QFileDialog QListView::item:selected, QFileDialog QSidebar::item:selected { background: #2d65d6; color: white; }
+    QFileDialog QComboBox { min-height: 28px; }
+    QStatusBar { background: #f0f4fa; color: #64748e; border-top: 1px solid #9aa7ba; }
+"""}
 
 
 class WorkerSignals(QObject):
@@ -188,6 +623,7 @@ def mod_type_tags(mod: Mod) -> list[tuple[str, str]]:
 class ModCard(QFrame):
     clicked = pyqtSignal(str)
     context_requested = pyqtSignal(str, object)
+    favorite_toggled = pyqtSignal(str)
 
     def __init__(self, mod: Mod, collection_names: list[str] | None = None, width: int | None = None):
         super().__init__()
@@ -197,13 +633,16 @@ class ModCard(QFrame):
             "modCardConflict" if mod.active and mod.conflict_with else ("modCardActive" if mod.active else "modCard")
         )
         self.setCursor(Qt.PointingHandCursor)
-        self.setFixedSize(card_width, ui(250))
+        # Card height now hugs the content so there is no large empty gap below
+        # the action button. The preview area is enlarged instead.
+        self.setFixedSize(card_width, ui(258))
         self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.setProperty("favorite", "true" if mod.favorite else "false")
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(ui(10), ui(8), ui(10), ui(8))
-        layout.setSpacing(ui(4))
-        preview = HoverPreview(mod, card_width - ui(20), ui(76), self)
+        layout.setContentsMargins(ui(10), ui(10), ui(10), ui(8))
+        layout.setSpacing(ui(0))
+        preview = HoverPreview(mod, card_width - ui(20), ui(112), self)
         preview.setObjectName("preview")
         layout.addWidget(preview)
 
@@ -212,7 +651,10 @@ class ModCard(QFrame):
         title.setToolTip(mod.title or mod.file_name)
         # Two Chinese/English title lines need enough line-height to avoid the
         # second line being clipped; metadata then flows beneath the full title.
-        title.setFixedHeight(ui(38))
+        # 40px gives two 13px lines comfortable headroom so descenders on the
+        # second line are no longer truncated.
+        title.setFixedHeight(ui(40))
+        layout.addSpacing(ui(2))
         layout.addWidget(title)
 
         code = mod.workshop_id or Path(mod.file_name).stem
@@ -227,28 +669,36 @@ class ModCard(QFrame):
         meta = QLabel("  ·  ".join(meta_parts))
         meta.setObjectName("cardMeta")
         meta.setWordWrap(True)
-        meta.setFixedHeight(ui(16))
+        meta.setFixedHeight(ui(14))
         layout.addWidget(meta)
 
         type_labels = [text for text, _color in mod_type_tags(mod)]
         type_summary = QLabel(f"tags: {' '.join(type_labels)}" if type_labels else "tags: -")
         type_summary.setObjectName("typeSummary")
         type_summary.setToolTip("类型标签：" + ("、".join(type_labels) if type_labels else "暂无"))
-        type_summary.setFixedHeight(ui(16))
+        type_summary.setFixedHeight(ui(14))
         layout.addWidget(type_summary)
 
-        tags = QHBoxLayout()
+        star = self._build_favorite_star()
+        tags_container = QWidget()
+        tags_container.setFixedHeight(ui(28))
+        tags = QHBoxLayout(tags_container)
+        tags.setContentsMargins(0, 0, 0, 0)
         self.tags_layout = tags
         tags.setSpacing(ui(5))
         if mod.active:
-            tags.addWidget(make_tag("已启用", "#35d49b"))
+            tags.addWidget(make_tag("已启用", "#2d65d6"))
         if mod.conflict_with:
             tags.addWidget(make_tag("存在冲突", "#ff7070"))
         self._add_source_tag(tags)
         tags.addStretch(1)
-        layout.addLayout(tags)
+        tags.addWidget(star)
+        layout.addWidget(tags_container)
 
+        # Push the action button to the bottom so it lines up across every card
+        # in the same row regardless of how many tag chips are shown above.
         layout.addStretch(1)
+
         action_row = QHBoxLayout()
         action_row.setSpacing(ui(6))
         button = QPushButton("禁用 Mod" if mod.active else "启用 Mod")
@@ -259,6 +709,35 @@ class ModCard(QFrame):
         action_row.addWidget(button, 1)
         layout.addLayout(action_row)
 
+
+    def _build_favorite_star(self) -> QPushButton:
+        star = QPushButton("★")
+        star.setObjectName("favoriteStar")
+        star.setCheckable(True)
+        star.setChecked(self.mod.favorite)
+        star.setToolTip("取消收藏" if self.mod.favorite else "收藏 Mod")
+        star.setFixedSize(ui(28), ui(28))
+        star.clicked.connect(self._on_favorite_clicked)
+        self.favorite_star = star
+        return star
+
+    def _on_favorite_clicked(self) -> None:
+        # Defer the actual toggle to the window handler so the state is flipped
+        # exactly once (it also persists and updates this card's star visual).
+        self.favorite_toggled.emit(self.mod.id)
+
+    def set_favorite(self, favorite: bool) -> None:
+        changed = favorite != self.mod.favorite
+        self.mod.favorite = favorite
+        self.setProperty("favorite", "true" if favorite else "false")
+        self.favorite_star.setChecked(favorite)
+        self.favorite_star.setToolTip("取消收藏" if favorite else "收藏 Mod")
+        if changed:
+            # Repolishing the whole subtree on every reused card during a
+            # refresh is expensive and can cascade style changes under load.
+            # Only restyle when the favorite state actually flips.
+            self.style().unpolish(self)
+            self.style().polish(self)
 
     def _add_source_tag(self, layout: QHBoxLayout) -> None:
         if self.mod.steam_loaded and self.mod.workshop_id:
@@ -281,18 +760,31 @@ class ModCard(QFrame):
         self.setObjectName(
             "modCardConflict" if self.mod.active and self.mod.conflict_with else ("modCardActive" if self.mod.active else "modCard")
         )
+        # Remove the dynamic tag widgets but never delete the persistent
+        # favorite star: it is re-added below and a queued deleteLater on it
+        # would free a widget still referenced by the layout (use-after-free
+        # crash). Detach everything, drop only the disposable tags, then put
+        # the star back.
+        detached: list[QWidget] = []
         while self.tags_layout.count():
             item = self.tags_layout.takeAt(0)
             if item.widget() is not None:
-                item.widget().deleteLater()
+                detached.append(item.widget())
+        for widget in detached:
+            if widget is self.favorite_star:
+                continue
+            widget.deleteLater()
         if self.mod.active:
-            self.tags_layout.addWidget(make_tag("已启用", "#35d49b"))
+            self.tags_layout.addWidget(make_tag("已启用", "#2d65d6"))
         if self.mod.conflict_with:
             self.tags_layout.addWidget(make_tag("存在冲突", "#ff7070"))
         self._add_source_tag(self.tags_layout)
         self.tags_layout.addStretch(1)
+        if self.favorite_star.parent() is not self.tags_layout:
+            self.tags_layout.addWidget(self.favorite_star)
         self.toggle_button.setText("禁用 Mod" if self.mod.active else "启用 Mod")
         self.toggle_button.setObjectName("cardActionActive" if self.mod.active else "cardAction")
+        self.set_favorite(self.mod.favorite)
         self.style().unpolish(self)
         self.style().polish(self)
         self.toggle_button.style().unpolish(self.toggle_button)
@@ -322,7 +814,36 @@ class HoverPreview(QLabel):
         self._hover_timer.timeout.connect(self._show_large_preview)
         self.setAlignment(Qt.AlignCenter)
         self.setFixedHeight(height)
-        self.setPixmap(make_preview_pixmap(mod, width, height))
+        self.setScaledContents(False)
+        self._scaled: QPixmap | None = make_preview_pixmap(mod, width, height)
+        self._refresh_preview_pixmap()
+
+    def resizeEvent(self, event) -> None:
+        self._refresh_preview_pixmap()
+        super().resizeEvent(event)
+
+    def _refresh_preview_pixmap(self) -> None:
+        """Compose a blurred fill and clear foreground into one safe pixmap."""
+        if self._scaled is not None and not self._scaled.isNull():
+            h = self.height()
+            w = self.width()
+            if w > 0 and h > 0:
+                target = QSize(w, h)
+                # A small cover image scaled back up makes a soft backdrop,
+                # without using native effects or extra child widgets.
+                small = self._scaled.scaled(
+                    max(1, w // 12), max(1, h // 12),
+                    Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation,
+                )
+                backdrop = small.scaled(target, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
+                foreground = self._scaled.scaled(target, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                composed = QPixmap(target)
+                composed.fill(Qt.transparent)
+                painter = QPainter(composed)
+                painter.drawPixmap((w - backdrop.width()) // 2, (h - backdrop.height()) // 2, backdrop)
+                painter.drawPixmap((w - foreground.width()) // 2, (h - foreground.height()) // 2, foreground)
+                painter.end()
+                self.setPixmap(composed)
 
     def enterEvent(self, event) -> None:
         self._hover_timer.start()
@@ -336,8 +857,8 @@ class HoverPreview(QLabel):
 
     def _show_large_preview(self) -> None:
         screen = QApplication.desktop().availableGeometry(self)
-        max_width = min(ui(720), screen.width() - ui(40))
-        max_height = min(ui(540), screen.height() - ui(80))
+        max_width = min(ui(560), screen.width() - ui(40))
+        max_height = min(ui(420), screen.height() - ui(80))
         pixmap = make_preview_pixmap(self.mod, max_width, max_height)
         if self._popup is None:
             popup = QLabel(None, Qt.Tool | Qt.FramelessWindowHint)
@@ -345,7 +866,8 @@ class HoverPreview(QLabel):
             popup.setAttribute(Qt.WA_ShowWithoutActivating, True)
             popup.setAlignment(Qt.AlignCenter)
             popup.setStyleSheet(
-                "background: #101722; border: 2px solid #5f83b5; padding: 8px;"
+                f"background: {theme_color('panel')};"
+                f" border: 2px solid {theme_color('panel_border')}; padding: 8px;"
             )
             self._popup = popup
         popup = self._popup
@@ -450,7 +972,7 @@ class BackgroundSurface(QWidget):
 
     def paintEvent(self, _event) -> None:
         painter = QPainter(self)
-        painter.fillRect(self.rect(), QColor("#10141c"))
+        painter.fillRect(self.rect(), QColor(theme_color("surface")))
         if not self._background.isNull():
             scaled = self._background.scaled(self.size(), Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
             x = (self.width() - scaled.width()) // 2
@@ -508,7 +1030,7 @@ class ConflictCard(QFrame):
         card_width = width or ui(208)
         self.setObjectName("conflictCard")
         self.setCursor(Qt.PointingHandCursor)
-        self.setFixedSize(card_width, ui(254))
+        self.setFixedSize(card_width, ui(250))
         self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(ui(10), ui(10), ui(10), ui(10))
@@ -773,6 +1295,12 @@ class AboutDialog(QDialog):
         content_layout.addWidget(designer)
         content_layout.addSpacing(ui(4))
         content_layout.addWidget(description)
+        github = QLabel("GitHub：https://github.com/chenduanyun091216/L4DBoss")
+        github.setObjectName("aboutLink")
+        github.setCursor(Qt.PointingHandCursor)
+        github.setStyleSheet("color: #2d65d6;")
+        github.mouseReleaseEvent = lambda _e: QDesktopServices.openUrl(QUrl("https://github.com/chenduanyun091216/L4DBoss"))
+        content_layout.addWidget(github)
         content_layout.addStretch(1)
         layout.addWidget(content, 1)
 
@@ -1026,7 +1554,9 @@ class CollectionItemDelegate(QStyledItemDelegate):
         # The delete affordance is painted after the default delegate, so
         # restore the normal popup background in its area as well.
         painter.fillRect(delete_rect, option.palette.base().color())
-        painter.setPen(QColor("#687384" if index.data(Qt.UserRole) == "default" else "#f1c2c7"))
+        painter.setPen(QColor(
+            theme_color("tree_default") if index.data(Qt.UserRole) == "default" else theme_color("tree_favorite")
+        ))
         painter.drawText(delete_rect, Qt.AlignCenter, "×")
         painter.restore()
 
@@ -1064,7 +1594,7 @@ class MultiSelectComboBox(QComboBox):
         super().paintEvent(event)
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
-        painter.setPen(QColor("#9fb2ce"))
+        painter.setPen(QColor(theme_color("tree_expand")))
         painter.setFont(QFont("Segoe UI Symbol", max(9, ui(13)), QFont.Bold))
         painter.translate(0, -ui(1))
         painter.drawText(self.rect().adjusted(0, 0, -ui(9), 0), Qt.AlignRight | Qt.AlignVCenter, "⌄")
@@ -1165,14 +1695,14 @@ class ToggleSwitch(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
         track = self.rect().adjusted(0, 1, -1, -2)
-        painter.setPen(QColor("#5b8ced" if self._checked else "#4a5d78"))
-        painter.setBrush(QColor("#2d65d6" if self._checked else "#35445a"))
+        painter.setPen(QColor(theme_color("toggle_on_border") if self._checked else theme_color("toggle_off_border")))
+        painter.setBrush(QColor(theme_color("toggle_on_fill") if self._checked else theme_color("toggle_off_fill")))
         painter.drawRoundedRect(track, track.height() / 2, track.height() / 2)
         knob_diameter = max(1, track.height() - ui(4))
         knob_x = track.right() - knob_diameter - ui(2) if self._checked else track.left() + ui(2)
         knob = track.adjusted(knob_x - track.left(), ui(2), knob_x - track.right() + knob_diameter, -ui(2))
         painter.setPen(Qt.NoPen)
-        painter.setBrush(QColor("#f4f8ff"))
+        painter.setBrush(QColor(theme_color("toggle_knob")))
         painter.drawEllipse(knob)
 
 
@@ -1187,6 +1717,9 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(ui(1020), ui(680))
         self.storage = AppStorage(USER_DATA_ROOT)
         self.settings = self.storage.load_settings()
+        self._theme = self.settings.get("theme", "dark")
+        if self._theme not in THEME_ORDER:
+            self._theme = "dark"
         self._simple_category_cache: dict[str, set[str]] = {}
         self.mods = self.storage.load_mods()
         self.steam_cache = self.storage.load_steam_cache()
@@ -1208,6 +1741,8 @@ class MainWindow(QMainWindow):
         self._collection_apply_timer.setSingleShot(True)
         self._collection_apply_timer.timeout.connect(self._apply_pending_collection_selection)
         self.current_category = "all"
+        self._tree_rebuilding = False
+        self._category_select_timer = None
         self.page_size = 100
         self.current_page = 0
         self.category_mode = "simple"
@@ -1330,11 +1865,12 @@ class MainWindow(QMainWindow):
         content_layout = QVBoxLayout(content)
         # Keep only a slim outer gutter; the toolbar uses the scrollbar width
         # as an inset so its controls align with the card viewport, not the bar.
-        content_layout.setContentsMargins(ui(22), ui(18), ui(8), ui(18))
-        content_layout.setSpacing(ui(14))
+        content_layout.setContentsMargins(ui(16), ui(6), ui(8), ui(18))
+        content_layout.setSpacing(ui(0))
         self.content_bar = self._build_content_bar()
         self.content_bar.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         content_layout.addWidget(self.content_bar)
+        content_layout.addSpacing(ui(8))
         self.scroll = QScrollArea()
         self.scroll.setObjectName("cardsScroll")
         self.scroll.setWidgetResizable(True)
@@ -1342,7 +1878,7 @@ class MainWindow(QMainWindow):
         self.scroll.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.scroll.viewport().setObjectName("cardsViewport")
         self.scroll.verticalScrollBar().rangeChanged.connect(self._schedule_content_alignment)
-        self._cards_loading_overlay = QFrame(self.scroll.viewport())
+        self._cards_loading_overlay = QFrame(self.scroll)
         self._cards_loading_overlay.setObjectName("cardsLoadingOverlay")
         loading_layout = QVBoxLayout(self._cards_loading_overlay)
         loading_layout.setContentsMargins(0, 0, 0, 0)
@@ -1372,8 +1908,8 @@ class MainWindow(QMainWindow):
         self.cards_host.setObjectName("cardsHost")
         self.cards_layout = QGridLayout(self.cards_host)
         self.cards_layout.setContentsMargins(0, 0, 0, 0)
-        self.cards_layout.setHorizontalSpacing(ui(15))
-        self.cards_layout.setVerticalSpacing(ui(16))
+        self.cards_layout.setHorizontalSpacing(ui(11))
+        self.cards_layout.setVerticalSpacing(ui(12))
         self.cards_layout.setAlignment(Qt.AlignTop | Qt.AlignLeft)
         self.scroll.setWidget(self.cards_host)
         content_layout.addWidget(self.scroll, 1)
@@ -1397,6 +1933,9 @@ class MainWindow(QMainWindow):
         pagination_layout.addWidget(self.page_label)
         pagination_layout.addWidget(self.next_page_button)
         pagination_layout.addStretch(1)
+        self.pagination_spacer = QWidget()
+        self.pagination_spacer.setFixedHeight(ui(10))
+        content_layout.addWidget(self.pagination_spacer)
         content_layout.addWidget(self.pagination_bar)
         body.addWidget(content)
         body.setSizes([ui(275), ui(1045)])
@@ -1414,7 +1953,7 @@ class MainWindow(QMainWindow):
         header.setFixedHeight(ui(56))
         layout = QHBoxLayout(header)
         layout.setContentsMargins(ui(24), ui(4), ui(8), ui(4))
-        layout.setSpacing(ui(10))
+        layout.setSpacing(ui(11))
         brand = QVBoxLayout()
         brand.setSpacing(0)
         name_row = QHBoxLayout()
@@ -1462,7 +2001,7 @@ class MainWindow(QMainWindow):
         self.header_hint.hide()
         layout.addWidget(self.header_hint)
         self.choose_button = self._header_button(
-            QStyle.SP_DirOpenIcon, "选择游戏", self.choose_directory,
+            QStyle.SP_FileDialogNewFolder, "选择游戏", self.choose_directory,
             secondary=True, tooltip="选择游戏：定位 left4dead2.exe 并扫描 addons 文件夹",
         )
         self.refresh_button = self._header_button(
@@ -1480,17 +2019,34 @@ class MainWindow(QMainWindow):
             button.installEventFilter(self)
         self.toggle_all_button = self._header_button(QStyle.SP_DialogApplyButton, "全部启动", self.toggle_all_mods)
         layout.addWidget(self.toggle_all_button)
+        self.theme_button = self._header_button(
+            QStyle.SP_DesktopIcon, "", self._open_theme_menu,
+        )
+        self._update_theme_button()
+        self._header_action_buttons = (
+            self.choose_button, self.refresh_button, self.fetch_button, self.theme_button,
+        )
+        header_action_width = max(button.sizeHint().width() for button in self._header_action_buttons) + ui(4)
+        for button in self._header_action_buttons:
+            button.setFixedWidth(header_action_width)
+        layout.addWidget(self.theme_button)
         close = QPushButton("×")
         close.setObjectName("closeButton")
         close.setText("×")
-        self.minimize_button = self._window_control_button("−", "最小化", self.showMinimized)
-        self.maximize_button = self._window_control_button("□", "最大化", self.toggle_maximized)
-        layout.addWidget(self.minimize_button)
-        layout.addWidget(self.maximize_button)
+        self.minimize_button = self._window_control_button("−", None, self.showMinimized)
+        self.maximize_button = self._window_control_button("□", None, self.toggle_maximized)
         close.setFixedSize(ui(30), ui(30))
-        close.setToolTip("关闭程序")
         close.clicked.connect(self.close)
-        layout.addWidget(close)
+        window_controls = QHBoxLayout()
+        window_controls.setContentsMargins(0, 0, 0, 0)
+        window_controls.setSpacing(ui(4))
+        window_controls.addWidget(self.minimize_button)
+        window_controls.addWidget(self.maximize_button)
+        window_controls.addWidget(close)
+        layout.addLayout(window_controls)
+        self.close_button = close
+        for button in (self.theme_button, self.minimize_button, self.maximize_button, self.close_button):
+            button.installEventFilter(self)
         return header
 
     def show_about(self) -> None:
@@ -1501,14 +2057,16 @@ class MainWindow(QMainWindow):
             getattr(self, "choose_button", None): "选择游戏：定位 left4dead2.exe 并扫描 addons 文件夹",
             getattr(self, "refresh_button", None): "扫描 Mod：重新扫描本地 addons 文件夹",
             getattr(self, "fetch_button", None): "同步 Steam：获取创意工坊 Mod 信息",
+            getattr(self, "theme_button", None): "切换主题：点击选择界面配色",
+            getattr(self, "minimize_button", None): "最小化窗口",
+            getattr(self, "maximize_button", None): "最大化 / 还原窗口",
+            getattr(self, "close_button", None): "关闭程序",
         }
         if source in hints and hasattr(self, "header_hint"):
             if event.type() == QEvent.Enter:
-                self.header_hint.setText(hints[source])
-                self.header_hint.show()
+                self._show_header_hint(hints[source])
             elif event.type() == QEvent.Leave:
-                self.header_hint.clear()
-                self.header_hint.hide()
+                self._clear_header_hint()
         return super().eventFilter(source, event)
 
     def _header_button(
@@ -1522,7 +2080,8 @@ class MainWindow(QMainWindow):
             button.setIconSize(QSize(ui(20), ui(20)))
         else:
             button.setObjectName("headerButtonSecondary" if secondary else "headerButton")
-        button.setToolTip(tooltip or text)
+        if tooltip:
+            button.setToolTip(tooltip)
         button.clicked.connect(handler)
         return button
 
@@ -1531,7 +2090,8 @@ class MainWindow(QMainWindow):
         button = QPushButton(symbol)
         button.setObjectName("windowControlButton")
         button.setFixedSize(ui(30), ui(30))
-        button.setToolTip(tooltip)
+        if tooltip:
+            button.setToolTip(tooltip)
         button.clicked.connect(handler)
         return button
 
@@ -1539,11 +2099,66 @@ class MainWindow(QMainWindow):
         if self.isMaximized():
             self.showNormal()
             self.maximize_button.setText("□")
-            self.maximize_button.setToolTip("最大化")
         else:
             self.showMaximized()
             self.maximize_button.setText("❐")
-            self.maximize_button.setToolTip("还原窗口")
+
+    def _show_header_hint(self, text: str) -> None:
+        self.header_hint.setText(text)
+        self.header_hint.setVisible(True)
+
+    def _clear_header_hint(self) -> None:
+        self.header_hint.setVisible(False)
+        self.header_hint.clear()
+
+    def _update_theme_button(self) -> None:
+        label = THEME_LABELS.get(self._theme, self._theme)
+        self.theme_button.setIcon(self._theme_icon())
+        self.theme_button.setText(f" {label} ▾")
+
+    def _theme_icon(self) -> QIcon:
+        """Create a compact light/dark disc for the theme selector."""
+        size = ui(22)
+        pixmap = QPixmap(size, size)
+        pixmap.fill(Qt.transparent)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor("#39c6dc"))
+        painter.drawEllipse(ui(2), ui(2), size - ui(4), size - ui(4))
+        painter.setBrush(QColor("#f5f8fd"))
+        painter.drawEllipse(ui(2), ui(2), (size - ui(4)) // 2, size - ui(4))
+        painter.setBrush(QColor("#18344e"))
+        painter.drawEllipse(ui(7), ui(7), ui(4), ui(4))
+        painter.end()
+        return QIcon(pixmap)
+
+    def _open_theme_menu(self) -> None:
+        from PyQt5.QtWidgets import QMenu
+
+        menu = QMenu(self)
+        menu.setObjectName("themeMenu")
+        for theme_key in THEME_ORDER:
+            action = menu.addAction(THEME_LABELS.get(theme_key, theme_key))
+            action.setCheckable(True)
+            action.setChecked(theme_key == self._theme)
+            hint = THEME_HINTS.get(theme_key, "")
+            action.hovered.connect(lambda h=hint: self._show_header_hint(h))
+            action.triggered.connect(lambda _checked=False, key=theme_key: self._set_theme(key))
+        menu.aboutToHide.connect(self._clear_header_hint)
+        menu.exec_(self.theme_button.mapToGlobal(self.theme_button.rect().bottomLeft()))
+
+    def _set_theme(self, theme_key: str) -> None:
+        if theme_key == self._theme:
+            return
+        self._theme = theme_key
+        self.settings["theme"] = theme_key
+        self.storage.save_settings(self.settings)
+        self._apply_style()
+        self._update_theme_button()
+        self.refresh_tree()
+        for card in self._card_widgets.values():
+            card.refresh_state()
 
     @staticmethod
     def _launch_icon() -> QIcon:
@@ -1594,7 +2209,6 @@ class MainWindow(QMainWindow):
         self.search_input.setPlaceholderText("搜索名称、作者或 Workshop ID…")
         self.search_input.setClearButtonEnabled(True)
         self.search_input.textChanged.connect(self.on_search_changed)
-        layout.addWidget(self.search_input)
         self.collection_combo = MultiSelectComboBox()
         self.collection_combo.setObjectName("collectionCombo")
         self.collection_combo.setMinimumWidth(ui(210))
@@ -1604,7 +2218,12 @@ class MainWindow(QMainWindow):
         self.collection_combo.view().setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.collection_combo.selection_changed.connect(self.on_collection_selection_changed)
         self.collection_combo.collection_delete_requested.connect(self.delete_collection)
-        layout.addWidget(self.collection_combo)
+        filter_controls = QHBoxLayout()
+        filter_controls.setContentsMargins(0, 0, 0, 0)
+        filter_controls.setSpacing(ui(11))
+        filter_controls.addWidget(self.search_input)
+        filter_controls.addWidget(self.collection_combo)
+        layout.addLayout(filter_controls)
         return bar
 
     def _build_footer_legacy(self) -> QWidget:
@@ -1668,7 +2287,7 @@ class MainWindow(QMainWindow):
         action_host = self.action_host
         action_layout = QHBoxLayout(action_host)
         action_layout.setContentsMargins(0, 0, 0, 0)
-        action_layout.setSpacing(ui(10))
+        action_layout.setSpacing(self.cards_layout.horizontalSpacing())
         self.steam_sync_widget = QWidget()
         self.steam_sync_widget.setObjectName("steamSyncStatus")
         sync_layout = QHBoxLayout(self.steam_sync_widget)
@@ -1687,211 +2306,43 @@ class MainWindow(QMainWindow):
         action_layout.addWidget(self.steam_sync_widget)
         action_layout.addStretch(1)
         action_layout.addWidget(self.toggle_all_button)
-        self.toggle_all_button.setFixedWidth(ui(112))
         self.save_button = QPushButton(self.style().standardIcon(QStyle.SP_DialogSaveButton), "保 存")
         self.save_button.setObjectName("primaryButton")
-        self.save_button.setFixedWidth(ui(112))
         self.save_button.clicked.connect(self.save_collection)
         action_layout.addWidget(self.save_button)
         self.save_as_button = QPushButton(self.style().standardIcon(QStyle.SP_FileDialogDetailedView), "另存为")
         self.save_as_button.setObjectName("secondaryButton")
-        self.save_as_button.setFixedWidth(ui(112))
         self.save_as_button.clicked.connect(self.save_collection_as_new)
         action_layout.addWidget(self.save_as_button)
         self.launch_button = QPushButton("  启动游戏")
         self.launch_button.setObjectName("launchButton")
-        self.launch_button.setFixedWidth(ui(112))
         self.launch_button.setIcon(self._launch_icon())
         self.launch_button.setIconSize(QSize(ui(20), ui(20)))
         self.launch_button.clicked.connect(self.launch_game)
         action_layout.addWidget(self.launch_button)
+        self._footer_action_buttons = (
+            self.toggle_all_button, self.save_button, self.save_as_button, self.launch_button,
+        )
+        action_buttons = self._header_action_buttons + self._footer_action_buttons
+        action_width = max(button.minimumSizeHint().width() for button in action_buttons)
+        action_height = max(ui(1), max(button.minimumSizeHint().height() for button in action_buttons) - ui(2))
+        for button in self._header_action_buttons:
+            button.setFixedSize(action_width, action_height)
+        for button in self._footer_action_buttons:
+            button.setFixedSize(action_width, action_height)
         layout.addWidget(action_host, 1)
         return footer
 
     def _apply_style(self) -> None:
-        self.setStyleSheet("""
-            QWidget { font-family: "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei"; }
-            QMainWindow, QDialog { background: transparent; color: #e8edf5; }
-            #appSurface { background: transparent; border-radius: 14px; }
-            #header { background: rgba(23, 29, 41, 210); border-bottom: 1px solid #2a3444; border-top-left-radius: 14px; border-top-right-radius: 14px; }
-            #brand { color: #f4f8ff; font-size: 20px; font-weight: 800; letter-spacing: 2px; }
-            #brandButton { color: #f4f8ff; background: transparent; border: 0; padding: 0; font-size: 20px; font-weight: 800; letter-spacing: 2px; text-align: left; }
-            #brandButton:hover { color: #79a5ff; }
-            #brandCredit { color: #8291a8; font-size: 11px; font-weight: 700; }
-            #brandSub, #contentSubtitle { color: #8090a8; font-size: 10px; font-weight: 700; letter-spacing: 1px; }
-            #headerHint { color: #a9bbd5; font-size: 11px; font-weight: 600; padding-right: 8px; }
-            #headerButton, #headerButtonSecondary { background: #273347; color: #d9e4f4; border: 1px solid #38465c; border-radius: 7px; padding: 8px 13px; font-weight: 700; }
-            #headerButton:hover, #headerButtonSecondary:hover { background: #33435c; color: white; }
-            #headerIconButton { background: #202c40; border: 0; border-radius: 7px; padding: 0; }
-            #headerIconButton:hover { background: #2d65d6; border: 0; }
-            QToolTip { color: #eaf2ff; background: #202b3b; border: 1px solid #40516a; border-radius: 5px; padding: 5px 8px; }
-            #primaryButton { background: #2d65d6; color: white; border: 0; border-radius: 7px; padding: 8px 13px; font-weight: 700; }
-            #primaryButton:hover { background: #3c78ee; }
-            #secondaryButton { background: #253247; color: #cfdbeb; border: 1px solid #3b4b62; border-radius: 7px; padding: 8px 13px; font-weight: 700; }
-            #secondaryButton:hover { background: #30415a; border-color: #526882; }
-            #totalModCount, #activeModCount { background: transparent; border: 0; padding: 0; font-weight: 700; }
-            #totalModCount { color: #75a7ff; }
-            #activeModCount { color: #48d89a; }
-            #totalModCount:hover, #activeModCount:hover { text-decoration: underline; }
-            #totalModCount[selected="true"] { border: 1px solid #75a7ff; border-radius: 6px; padding: 3px 6px; }
-            #activeModCount[selected="true"] { border: 1px solid #48d89a; border-radius: 6px; padding: 3px 6px; }
-            #launchButton { background: #16845b; color: white; border: 0; border-radius: 7px; padding: 8px 13px; font-weight: 700; }
-            #launchButton:hover { background: #20a873; }
-            #launchButton:disabled { color: #8b9aab; background: #293544; }
-            #sidebar { background: rgba(21, 27, 38, 205); border-right: 1px solid #283242; }
-            #sectionLabel { color: #94a4bc; font-size: 11px; font-weight: 800; letter-spacing: 1px; }
-            #categorySwitchLabel { color: #91a0b4; font-size: 11px; font-weight: 700; }
-            #sideHint { color: #718097; font-size: 11px; line-height: 1.45; padding: 10px; background: #1c2533; border-radius: 7px; }
-            QTreeWidget { background: transparent; border: 0; color: #b8c4d5; outline: none; font-size: 13px; }
-            QTreeWidget::item { min-height: 29px; border-radius: 6px; padding: 4px 6px; }
-            QTreeWidget::item:hover { background: #212b3a; color: #f2f6fc; }
-            QTreeWidget::item:selected { background: #2b5fca; color: white; font-weight: 700; }
-            QScrollArea { border: 0; background: transparent; }
-            #cardsScroll, #cardsViewport, #cardsHost { background: transparent; }
-            #cardsLoadingOverlay { background: rgba(10, 15, 24, 80); }
-            #cardsLoadingPanel { background: #18212e; border: 2px solid #5486ec; border-radius: 12px; }
-            #cardsLoadingSpinner { color: #78a8ff; font-size: 30px; font-weight: 700; }
-            #cardsLoadingLabel { color: #c4d5ee; font-size: 13px; font-weight: 700; }
-            QScrollBar:vertical { background: #10151e; width: 8px; margin: 5px 0 5px 0; border-radius: 4px; }
-            QScrollBar::handle:vertical { background: #273242; min-height: 42px; border-radius: 4px; }
-            QScrollBar::handle:vertical:hover { background: #3a4a60; }
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
-            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }
-            QScrollBar:horizontal { background: #10151e; height: 8px; margin: 0 4px 3px 4px; border-radius: 4px; }
-            QScrollBar::handle:horizontal { background: #273242; min-width: 42px; border-radius: 4px; }
-            QScrollBar::handle:horizontal:hover { background: #3a4a60; }
-            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; }
-            QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal { background: transparent; }
-            #contentTitle { color: #f1f5fb; font-size: 22px; font-weight: 800; }
-            QLineEdit, QComboBox { min-height: 32px; background: #19212e; color: #e6edf7; border: 1px solid #2c384a; border-radius: 7px; padding: 0 11px; }
-            QLineEdit:focus, QComboBox:focus { border-color: #5486ec; background: #1b2534; }
-            #searchInput { min-width: 235px; }
-            #collectionCombo { padding-left: 12px; padding-right: 30px; font-weight: 600; }
-            #collectionCombo QLineEdit { background: transparent; border: 0; padding: 0; color: #e6edf7; font-weight: 600; }
-            #collectionCombo:hover { background: #202b3c; border-color: #3b506e; }
-            #collectionCombo::drop-down { subcontrol-origin: padding; subcontrol-position: top right; border: 0; width: 30px; }
-            #collectionComboMenu { background: #18212e; color: #dfe9f8; border: 1px solid #3a4a61; border-radius: 8px; outline: 0; padding: 5px; selection-background-color: transparent; }
-            #collectionComboMenu::item { min-height: 25px; border: 1px solid transparent; border-radius: 6px; padding: 0 12px; margin: 1px 0; }
-            #collectionComboMenu::item:hover { background: #25344a; border-color: #3a5272; color: #ffffff; }
-            #collectionComboMenu::item:selected { background: #2d65d6; border-color: #4d83eb; color: #ffffff; font-weight: 700; }
-            #collectionComboMenu QScrollBar:vertical { background: transparent; width: 7px; margin: 7px 3px 7px 0; }
-            #collectionComboMenu QScrollBar::handle:vertical { background: #3a4b63; min-height: 30px; border-radius: 3px; }
-            #collectionComboMenu QScrollBar::handle:vertical:hover { background: #50709a; }
-            #modCard, #modCardActive, #modCardConflict { background: #18202c; border: 1px solid #293649; border-radius: 10px; }
-            #modCard:hover { background: #1c2634; border-color: #4c6890; }
-            #modCardActive { border: 2px solid #23c987; background: #12362e; }
-            #modCardActive:hover { background: #174538; border-color: #55efad; }
-            #modCardConflict { border: 2px solid #f04455; background: #481923; }
-            #modCardConflict:hover { background: #5a1d29; border-color: #ff7885; }
-            #preview { background: #111821; border-radius: 7px; min-height: 76px; max-height: 76px; }
-            #cardTitle { color: #f2f6fc; font-size: 13px; font-weight: 700; }
-            #cardMeta { color: #91a0b4; font-size: 10px; }
-            #typeSummary { color: #91a0b4; font-size: 9px; font-weight: 600; padding: 0; }
-            #tag, #tagButton { min-height: 20px; max-height: 20px; color: #ffffff; border-radius: 4px; padding: 0 6px; font-size: 9px; font-weight: 700; }
-            #cardAction, #cardActionActive { min-height: 24px; max-height: 24px; border-radius: 6px; font-size: 11px; font-weight: 700; }
-            #cardAction { color: #cbd7e8; background: #253247; border: 1px solid #34445c; }
-            #cardAction:hover { color: white; background: #2d65d6; border-color: #2d65d6; }
-            #cardActionActive { color: #d2ffeb; background: #167453; border: 1px solid #2be39a; }
-            #cardActionActive:hover { color: white; background: #b84752; border-color: #b84752; }
-            #tagButton { border: 0; }
-            #tagButton:hover { border: 1px solid #d8e7ff; padding: 0 5px; }
-            #emptyText { color: #9db2d0; background: transparent; border: 0; padding: 0; font-size: 15px; font-weight: 500; line-height: 1.7; letter-spacing: 0.5px; }
-            #paginationBar { min-height: 26px; }
-            #paginationButton { min-height: 0; max-height: 22px; color: #cbd7e8; background: #253247; border: 1px solid #34445c; border-radius: 5px; padding: 0 9px; font-size: 11px; }
-            #paginationButton:hover { color: white; background: #2d65d6; border-color: #2d65d6; }
-            #paginationButton:disabled { color: #687384; background: #1b222d; border-color: #2d3747; }
-            #pageLabel { color: #91a0b4; min-width: 64px; font-size: 11px; qproperty-alignment: AlignCenter; }
-            #steamSyncStatus { background: #1b2a3d; border: 1px solid #355577; border-radius: 7px; }
-            #steamSyncLabel { color: #bcd7ff; font-size: 11px; font-weight: 700; }
-            #steamSyncProgress { min-height: 6px; max-height: 6px; border: 0; border-radius: 3px; background: #263a54; }
-            #steamSyncProgress::chunk { border-radius: 3px; background: #4c86eb; }
-            #footer { background: rgba(21, 27, 38, 205); border-top: 1px solid #283242; border-bottom-left-radius: 14px; border-bottom-right-radius: 14px; }
-            #footer QLabel { color: #9eacc0; padding-right: 12px; }
-            #conflictButton { color: #ffabab; background: transparent; border: 0; font-weight: 700; }
-            #conflictButton:hover { text-decoration: underline; }
-            #conflictButton:disabled { color: #718097; }
-            #conflictButton[selected="true"] { border: 1px solid #ff8f99; border-radius: 6px; padding: 3px 6px; }
-            #closeButton { min-width: 30px; max-width: 30px; min-height: 30px; max-height: 30px; padding: 0; border: 0; color: #92a1b6; background: transparent; font-size: 18px; font-weight: 800; }
-            #closeButton:hover { color: #ff7a85; background: transparent; }
-            #windowControlButton { padding: 0; border: 0; color: #92a1b6; background: transparent; font-size: 16px; font-weight: 700; }
-            #windowControlButton:hover { color: #f3f7ff; background: #29364a; border-radius: 5px; }
-            #dialogHeader { background: #1b2432; border-bottom: 1px solid #2d3a4d; border-top-left-radius: 14px; border-top-right-radius: 14px; }
-            #dialogTitle { color: #f1f5fb; font-size: 17px; font-weight: 800; }
-            #modDetailsContent { background: #151d29; border-bottom-left-radius: 14px; border-bottom-right-radius: 14px; }
-            #modDetailsTitle { color: #f4f8ff; font-size: 16px; font-weight: 800; }
-            #modDetailsKey { color: #8ca4c6; font-size: 11px; font-weight: 700; }
-            #modDetailsValue { color: #e2ebf8; font-size: 11px; }
-            #modDetailsDescription { color: #b9c7d9; background: #111822; border: 1px solid #29384d; border-radius: 7px; padding: 9px; font-size: 11px; }
-            #contentBackButton { color: #aebfd6; background: transparent; border: 0; padding: 0; }
-            #contentBackButton:hover { color: #ffffff; background: rgba(73, 103, 145, 120); border-radius: 5px; }
-            #mainDetailsHost, #mainConflictHost { background: transparent; }
-            #mainDetailsPreview { background: #111821; border: 1px solid #29384d; border-radius: 9px; }
-            #mainDetailsTitle { color: #f3f7fd; font-size: 18px; font-weight: 800; }
-            #mainDetailsField { color: #b6c6da; font-size: 12px; padding: 2px 0; }
-            #mainDetailsDescription { color: #cad6e7; background: rgba(17, 24, 34, 220); border: 1px solid #29384d; border-radius: 8px; padding: 12px; font-size: 12px; line-height: 1.55; }
-            #steamDetailsLink { min-height: 28px; color: #dceaff; background: #285b9d; border: 1px solid #4b82c8; border-radius: 6px; padding: 0 10px; font-size: 11px; font-weight: 700; }
-            #steamDetailsLink:hover { background: #3470bc; color: white; }
-            #mainConflictGroup { background: rgba(28, 31, 43, 235); border: 1px solid #a54c5a; border-radius: 10px; }
-            #mainConflictGroupTitle { color: #ffc0c7; font-size: 12px; font-weight: 800; }
-            #mainConflictGroupReason { color: #d4e1f3; background: #202c3d; border: 1px solid #3e506a; border-radius: 5px; padding: 5px 7px; font-size: 10px; }
-            #dialogSubtitle { color: #8596af; font-size: 11px; }
-            #aboutContent { background: #121924; border-bottom-left-radius: 14px; border-bottom-right-radius: 14px; }
-            #aboutBrand { color: #f1f5fb; font-size: 25px; font-weight: 800; letter-spacing: 2px; }
-            #aboutVersion { color: #7698d9; font-size: 12px; font-weight: 700; }
-            #aboutDesigner { color: #aebbd0; font-size: 12px; font-weight: 500; padding: 2px 0; background: transparent; border: 0; }
-            #aboutDescription { color: #9eacc0; font-size: 12px; line-height: 1.55; }
-            #conflictBody { background: #10141c; border: 0; border-bottom-left-radius: 14px; border-bottom-right-radius: 14px; }
-            #conflictScroll { background: transparent; border: 0; }
-            #conflictViewport { background: #10141c; border: 0; border-bottom-left-radius: 14px; border-bottom-right-radius: 14px; }
-            #conflictHost { background: transparent; border: 0; }
-            #groupCardScroll, #groupCardsHost { background: #151d29; border: 0; border-radius: 7px; }
-            #conflictGroup { background: #151d29; border: 1px solid #303b4d; border-radius: 10px; }
-            #conflictGroupLabel { color: #e99aa2; font-size: 11px; font-weight: 800; letter-spacing: 1px; }
-            #conflictCard { background: #20202b; border: 1px solid #6d404b; border-radius: 10px; }
-            #conflictCard:hover { background: #282333; border-color: #b85866; }
-            #conflictCountBadge { color: #fff4f5; background: #b84752; border: 1px solid #ef7d87; border-radius: 12px; font-size: 11px; font-weight: 800; }
-            #conflictPreview { background: #111821; border-radius: 7px; min-height: 104px; max-height: 104px; }
-            #conflictCaption { color: #f08b96; font-size: 11px; font-weight: 700; }
-            #conflictMeta { color: #aebbd0; font-size: 9px; }
-            #conflictPeers { color: #abb8c9; font-size: 11px; }
-            #conflictPeerButton { max-height: 28px; color: #ffd3d7; background: #3c2730; border: 1px solid #754551; border-radius: 6px; padding: 0 9px; font-size: 11px; font-weight: 700; }
-            #conflictPeerButton:hover { color: white; background: #c94a54; border-color: #e26770; }
-            #promptSurface { background: #18212e; border: 1px solid #3a4a61; border-radius: 12px; }
-            #promptText { color: #e5edf9; font-size: 13px; line-height: 1.5; }
-            #promptIconInfo, #promptIconWarning, #promptIconError { color: white; border-radius: 15px; font-size: 16px; font-weight: 800; }
-            #promptIconInfo { background: #2d65d6; border: 1px solid #5b8ced; }
-            #promptIconWarning { background: #a66d24; border: 1px solid #e5a34a; }
-            #promptIconError { background: #a93f4c; border: 1px solid #ed7681; }
-            #promptInput { min-height: 34px; background: #111a26; color: #eef5ff; border: 1px solid #3a4a61; border-radius: 7px; padding: 0 10px; }
-            #promptInput:focus { background: #162131; border-color: #5486ec; }
-            #promptPrimaryButton, #promptSecondaryButton { min-height: 32px; border-radius: 6px; padding: 0 15px; font-weight: 700; }
-            #promptPrimaryButton { background: #2d65d6; color: white; border: 1px solid #3d78e7; }
-            #promptPrimaryButton:hover { background: #3c78ee; border-color: #6297f3; }
-            #promptSecondaryButton { background: #253247; color: #cfdbeb; border: 1px solid #3b4b62; }
-            #promptSecondaryButton:hover { background: #30415a; border-color: #526882; }
-            QToolTip { background: #202c3d; color: #e9f1ff; border: 1px solid #496282; border-radius: 5px; padding: 6px 8px; font-size: 11px; }
-            QMenu { background: #18212e; color: #dfe9f8; border: 1px solid #3a4a61; border-radius: 8px; padding: 5px; }
-            QMenu::item { min-height: 29px; border-radius: 5px; padding: 0 26px 0 11px; margin: 1px 0; }
-            QMenu::item:selected { background: #2d65d6; color: white; }
-            QMenu::item:disabled { color: #718097; background: transparent; }
-            QMenu::separator { height: 1px; background: #304057; margin: 5px 8px; }
-            QMenu::right-arrow { width: 8px; height: 8px; }
-            QMessageBox, QInputDialog, QFileDialog { background: #18212e; color: #e8edf5; }
-            QMessageBox QLabel, QInputDialog QLabel, QFileDialog QLabel { color: #dce6f5; }
-            QMessageBox QLabel#qt_msgbox_label { min-width: 280px; line-height: 1.45; }
-            QMessageBox QPushButton, QInputDialog QPushButton, QFileDialog QPushButton { min-height: 30px; background: #2d65d6; color: white; border: 1px solid #3d78e7; border-radius: 6px; padding: 0 14px; font-weight: 700; }
-            QMessageBox QPushButton:hover, QInputDialog QPushButton:hover, QFileDialog QPushButton:hover { background: #3c78ee; border-color: #6297f3; }
-            QMessageBox QPushButton:pressed, QInputDialog QPushButton:pressed, QFileDialog QPushButton:pressed { background: #2455b9; }
-            QMessageBox QPushButton[text="取消"], QMessageBox QPushButton[text="否"], QInputDialog QPushButton[text="取消"], QFileDialog QPushButton[text="取消"] { background: #253247; border-color: #3b4b62; color: #cfdbeb; }
-            QMessageBox QPushButton[text="取消"]:hover, QMessageBox QPushButton[text="否"]:hover, QInputDialog QPushButton[text="取消"]:hover, QFileDialog QPushButton[text="取消"]:hover { background: #30415a; border-color: #526882; }
-            QInputDialog QLineEdit, QFileDialog QLineEdit { min-height: 30px; background: #121a25; color: #edf4ff; border: 1px solid #3a4a61; border-radius: 6px; padding: 0 9px; }
-            QInputDialog QLineEdit:focus, QFileDialog QLineEdit:focus { border-color: #5486ec; background: #162131; }
-            QFileDialog QTreeView, QFileDialog QListView, QFileDialog QSidebar { background: #121a25; color: #dce6f5; border: 1px solid #303e53; outline: 0; }
-            QFileDialog QTreeView::item, QFileDialog QListView::item, QFileDialog QSidebar::item { min-height: 27px; padding: 2px 7px; }
-            QFileDialog QTreeView::item:selected, QFileDialog QListView::item:selected, QFileDialog QSidebar::item:selected { background: #2d65d6; color: white; }
-            QFileDialog QComboBox { min-height: 28px; }
-            QStatusBar { background: #151b26; color: #91a0b4; border-top: 1px solid #283242; }
-        """)
+        global ACTIVE_THEME
+        ACTIVE_THEME = self._theme
+        app = QApplication.instance()
+        if app is not None:
+            app.setStyleSheet(THEMES.get(self._theme, THEMES["dark"]))
+        self.setStyleSheet("")
+        # Re-evaluate button minimum sizes after the stylesheet has applied;
+        # padding and font metrics are part of the real required width.
+        QTimer.singleShot(0, self._sync_content_right_edges)
 
     def _rebuild_conflict_index(self) -> None:
         self._conflict_paths = {
@@ -1949,20 +2400,24 @@ class MainWindow(QMainWindow):
 
     def refresh_tree(self) -> None:
         selected = self.current_category
-        self.category_tree.clear()
-        categories = SIMPLE_CATEGORIES if self.category_mode == "simple" else CATEGORIES
-        for category in categories:
-            self.category_tree.addTopLevelItem(self._make_tree_item(category, 0))
-        self.category_tree.expandAll()
-        target = self.category_tree.topLevelItem(0)
-        stack = [target] if target is not None else []
-        while stack:
-            item = stack.pop()
-            if item.data(0, Qt.UserRole) == selected:
-                target = item
-                break
-            stack.extend(item.child(index) for index in range(item.childCount()))
-        self.category_tree.setCurrentItem(target)
+        self._tree_rebuilding = True
+        try:
+            self.category_tree.clear()
+            categories = SIMPLE_CATEGORIES if self.category_mode == "simple" else CATEGORIES
+            for category in categories:
+                self.category_tree.addTopLevelItem(self._make_tree_item(category, 0))
+            self.category_tree.expandAll()
+            target = self.category_tree.topLevelItem(0)
+            stack = [target] if target is not None else []
+            while stack:
+                item = stack.pop()
+                if item.data(0, Qt.UserRole) == selected:
+                    target = item
+                    break
+                stack.extend(item.child(index) for index in range(item.childCount()))
+            self.category_tree.setCurrentItem(target)
+        finally:
+            self._tree_rebuilding = False
 
     def _make_tree_item(self, entry, depth: int) -> QTreeWidgetItem:
         if isinstance(entry, tuple):
@@ -1972,7 +2427,14 @@ class MainWindow(QMainWindow):
             child_font = QFont(self.category_tree.font())
             child_font.setPointSize(max(9, child_font.pointSize() - (1 if depth > 1 else 0)))
             item.setFont(0, child_font)
-            item.setForeground(0, QColor("#aab8cc" if depth == 1 else "#899ab2"))
+            # Leaf (no children): top-level stays blue; on the light theme
+            # leaves use a mid gray to balance the darker parent titles.
+            if depth == 0:
+                item.setForeground(0, QColor(theme_color("link")))
+            elif self._theme == "light":
+                item.setForeground(0, QColor("#6b7589"))
+            else:
+                item.setForeground(0, QColor(theme_color("tree_default")))
             return item
         item = QTreeWidgetItem([entry["label"]])
         item.setData(0, Qt.UserRole, entry["id"])
@@ -1981,7 +2443,12 @@ class MainWindow(QMainWindow):
         root_font.setBold(depth == 0 or (self.category_mode == "simple" and depth == 1))
         root_font.setPointSize(max(10, root_font.pointSize() + (1 if depth == 0 else 0)))
         item.setFont(0, root_font)
-        item.setForeground(0, QColor("#edf3fc" if depth == 0 else "#aab8cc"))
+        # Branches (have children): on the light theme every parent title uses
+        # a soft dark gray; other themes keep top-level blue and deeper levels gray.
+        if self._theme == "light":
+            item.setForeground(0, QColor("#44506a"))
+        else:
+            item.setForeground(0, QColor(theme_color("link") if depth == 0 else theme_color("tree_default")))
         for child in entry.get("children", []):
             item.addChild(self._make_tree_item(child, depth + 1))
         return item
@@ -2072,6 +2539,7 @@ class MainWindow(QMainWindow):
                 card = ModCard(mod, self.collection_names_for(mod.id), card_width)
                 card.clicked.connect(self.toggle_mod)
                 card.context_requested.connect(self.show_card_context_menu)
+                card.favorite_toggled.connect(self.toggle_favorite)
                 self._card_cache[mod.id] = card
             else:
                 card.mod = mod
@@ -2100,6 +2568,7 @@ class MainWindow(QMainWindow):
     def _update_pagination(self, total: int, total_pages: int) -> None:
         visible = total_pages > 1
         self.pagination_bar.setVisible(visible)
+        self.pagination_spacer.setVisible(visible)
         if not visible:
             return
         self.page_label.setText(f"第 {self.current_page + 1} / {total_pages} 页")
@@ -2116,14 +2585,15 @@ class MainWindow(QMainWindow):
 
     def card_columns(self) -> int:
         width = self._card_viewport_width()
-        spacing = ui(15)
+        spacing = self.cards_layout.horizontalSpacing() if hasattr(self, "cards_layout") else ui(11)
         # Four compact cards should fit in the default window.  Cards expand to
         # use any extra room, so the final column never leaves a large dead area.
         return max(1, (width + spacing) // (ui(200) + spacing))
 
     def card_width(self, columns: int) -> int:
         width = self._card_viewport_width()
-        return max(ui(160), (width - ui(15) * (columns - 1)) // columns)
+        spacing = self.cards_layout.horizontalSpacing() if hasattr(self, "cards_layout") else ui(11)
+        return max(ui(160), (width - spacing * (columns - 1)) // columns)
 
     def _card_viewport_width(self) -> int:
         if not hasattr(self, "scroll"):
@@ -2139,7 +2609,7 @@ class MainWindow(QMainWindow):
     def _show_cards_loading(self) -> None:
         if not hasattr(self, "_cards_loading_overlay"):
             return
-        self._cards_loading_overlay.setGeometry(self.scroll.viewport().rect())
+        self._cards_loading_overlay.setGeometry(self.scroll.rect())
         self._cards_loading_overlay.raise_()
         self._cards_loading_overlay.show()
         self._cards_loading_timer.start(120)
@@ -2174,7 +2644,6 @@ class MainWindow(QMainWindow):
             return
         columns = self.card_columns()
         card_width = self.card_width(columns)
-        card_width = self.card_width(columns)
         existing_columns = max(columns, self.cards_layout.columnCount())
         for column in range(existing_columns):
             self.cards_layout.setColumnMinimumWidth(column, card_width if column < columns else 0)
@@ -2196,12 +2665,33 @@ class MainWindow(QMainWindow):
         inset = scrollbar.width() or scrollbar.sizeHint().width()
         self.content_bar.layout().setContentsMargins(0, 0, inset, 0)
         self.pagination_bar.layout().setContentsMargins(0, 0, inset, 0)
+        # Match both toolbar controls to one card column.  As the combo box
+        # remains the final item in this right-aligned layout, its right edge
+        # shares the right edge of the last card as well.
+        if hasattr(self, "search_input") and hasattr(self, "collection_combo"):
+            control_width = self.card_width(self.card_columns())
+            self.collection_combo.setFixedWidth(control_width)
+            # Keep the combo box anchored to the card grid's right edge, then
+            # derive the search width from the actual header button position.
+            # This keeps their left borders aligned at every window size.
+            if hasattr(self, "choose_button"):
+                search_right = self.search_input.mapToGlobal(QPoint(self.search_input.width(), 0)).x()
+                target_left = self.choose_button.mapToGlobal(QPoint(0, 0)).x()
+                self.search_input.setFixedWidth(max(ui(160), search_right - target_left))
+        if hasattr(self, "_footer_action_buttons") and hasattr(self, "_header_action_buttons"):
+            grid_gap = self.cards_layout.horizontalSpacing()
+            self.action_host.layout().setSpacing(grid_gap)
+            action_buttons = self._header_action_buttons + self._footer_action_buttons
+            action_width = max(button.minimumSizeHint().width() for button in action_buttons)
+            action_height = max(ui(1), max(button.minimumSizeHint().height() for button in action_buttons) - ui(2))
+            for button in action_buttons:
+                button.setFixedSize(action_width, action_height)
         if hasattr(self, "action_host"):
             # The footer starts after the fixed sidebar.  Mirror the content
             # area's outer gutter and scrollbar inset for a shared right edge.
             # The footer itself extends to the app edge, so include that outer
             # gutter as well when aligning its final action to the viewport.
-            self.action_host.layout().setContentsMargins(ui(22), 0, ui(8) + inset, 0)
+            self.action_host.layout().setContentsMargins(ui(16), 0, ui(8) + inset, 0)
 
     def _schedule_content_alignment(self, *_args) -> None:
         if self._content_alignment_pending or not hasattr(self, "scroll"):
@@ -2217,18 +2707,17 @@ class MainWindow(QMainWindow):
         mod = self.mods.get(mod_id)
         if mod is None:
             return
+        details_action = menu.addAction("查看详细信息")
+        details_action.triggered.connect(lambda: self.show_mod_details(mod))
         source_action = menu.addAction("查看源文件")
         source_action.setToolTip("打开该 Mod 所在文件夹")
         source_action.triggered.connect(lambda: self.open_mod_source(mod))
-        details_action = menu.addAction("查看详细信息")
-        details_action.triggered.connect(lambda: self.show_mod_details(mod))
         steam_action = menu.addAction("同步当前 Mod Steam 信息")
         steam_action.setEnabled(bool(mod.workshop_id) and not self.steam_sync_in_progress)
         steam_action.triggered.connect(lambda: self.sync_single_mod_steam(mod_id))
         delete_action = menu.addAction("删除 Mod")
         delete_action.setToolTip("删除该 Mod 文件及其关联预览图片")
         delete_action.triggered.connect(lambda: self.delete_mod(mod_id))
-        menu.addSeparator()
         add_menu = menu.addMenu("加入已保存的组合")
         existing = set(self.collection_names_for(mod_id))
         if not self.collections:
@@ -2256,7 +2745,7 @@ class MainWindow(QMainWindow):
         if file_path.is_file():
             subprocess.Popen(["explorer.exe", "/select,", str(file_path)])
         else:
-            QMessageBox.warning(None, "文件不存在", f"找不到 Mod 文件：\n{file_path}")
+            QMessageBox.warning(self, "文件不存在", f"找不到 Mod 文件：\n{file_path}")
 
     def delete_mod(self, mod_id: str) -> None:
         """Remove only the selected Mod file and its recorded preview image."""
@@ -2315,6 +2804,8 @@ class MainWindow(QMainWindow):
         self.search_input.hide()
         self.collection_combo.hide()
         self.pagination_bar.hide()
+        if hasattr(self, "pagination_spacer"):
+            self.pagination_spacer.hide()
         self.cards_layout.setAlignment(Qt.AlignTop | Qt.AlignLeft)
         self.cards_layout.addWidget(widget, 0, 0)
 
@@ -2450,7 +2941,11 @@ class MainWindow(QMainWindow):
                     self._mod_sort_cache[mod.id] = 0
         return sorted(
             mods,
-            key=lambda mod: (self._mod_sort_cache.get(mod.id, 0), mod.title.casefold()),
+            key=lambda mod: (
+                mod.favorite,
+                mod.favorite_at if mod.favorite else self._mod_sort_cache.get(mod.id, 0),
+                mod.title.casefold(),
+            ),
             reverse=True,
         )
 
@@ -2659,13 +3154,27 @@ class MainWindow(QMainWindow):
         self.apply_selected_collections()
 
     def on_category_selected(self) -> None:
+        if self._tree_rebuilding:
+            return
         items = self.category_tree.selectedItems()
-        if items:
-            self.current_category = items[0].data(0, Qt.UserRole)
-            self.content_title.setText(items[0].text(0))
-            self._update_mod_filter_title()
-            self.current_page = 0
-            self.refresh_cards()
+        if not items:
+            return
+        self.current_category = items[0].data(0, Qt.UserRole)
+        self.content_title.setText(items[0].text(0))
+        self._update_mod_filter_title()
+        self.current_page = 0
+        # Debounce rapid clicks: coalesce a burst of selections into a single
+        # refresh so we never stack multiple full card rebuilds on one another.
+        if self._category_select_timer is None:
+            self._category_select_timer = QTimer(self)
+            self._category_select_timer.setSingleShot(True)
+            self._category_select_timer.timeout.connect(self._run_category_refresh)
+        self._category_select_timer.start(0)
+
+    def _run_category_refresh(self) -> None:
+        if self._tree_rebuilding:
+            return
+        self.refresh_cards()
 
     def choose_directory(self) -> None:
         steam_game = self.find_steam_game_executable()
@@ -2993,6 +3502,22 @@ class MainWindow(QMainWindow):
             self._refresh_card_states(affected)
             self.refresh_stats()
 
+    def toggle_favorite(self, mod_id: str) -> None:
+        mod = self.mods.get(mod_id)
+        if mod is None:
+            return
+        mod.favorite = not mod.favorite
+        if mod.favorite:
+            mod.favorite_at = time.time_ns()
+        else:
+            mod.favorite_at = 0
+        # Persist the new state, but do NOT re-sort immediately. The card only
+        # updates its star visual; the ordering takes effect on the next refresh.
+        self.storage.save_mods(self.mods)
+        card = self._card_widgets.get(mod_id)
+        if card is not None:
+            card.set_favorite(mod.favorite)
+
     def show_conflicts(self) -> None:
         conflicted = [mod for mod in self.mods.values() if mod.active and mod.conflict_with]
         if not conflicted:
@@ -3236,10 +3761,12 @@ class MainWindow(QMainWindow):
             self._cards_loading_overlay.setGeometry(self.scroll.viewport().rect())
         if hasattr(self, "cards_layout"):
             self._schedule_cards_refresh()
+            QTimer.singleShot(0, self._sync_content_right_edges)
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
         self._apply_native_window_corner()
+        QTimer.singleShot(0, self._sync_content_right_edges)
 
     def _apply_native_window_corner(self) -> None:
         """Ask Windows DWM to render smooth native rounded window corners."""
