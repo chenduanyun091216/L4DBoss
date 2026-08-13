@@ -25,7 +25,7 @@ from PyQt5.QtWidgets import (
 )
 
 from .categories import CATEGORIES, SIMPLE_CATEGORIES, infer_categories, simple_categories
-from .collection_sync import restore_collection_files, sync_collection_files
+from .collection_sync import delete_collection_folder, restore_collection_files, sync_collection_files
 from .models import Mod, ModCollection
 from .steam_client import SteamClient
 from .storage import AppStorage
@@ -315,25 +315,71 @@ class HoverPreview(QLabel):
         self.mod = mod
         self.base_width = width
         self.base_height = height
+        self._popup: QLabel | None = None
+        self._hover_timer = QTimer(self)
+        self._hover_timer.setSingleShot(True)
+        self._hover_timer.setInterval(600)
+        self._hover_timer.timeout.connect(self._show_large_preview)
         self.setAlignment(Qt.AlignCenter)
         self.setFixedHeight(height)
         self.setPixmap(make_preview_pixmap(mod, width, height))
 
     def enterEvent(self, event) -> None:
-        normal = self.geometry()
-        expanded = normal.adjusted(-ui(18), -ui(12), ui(18), ui(28))
-        self.setGeometry(expanded)
-        self.raise_()
-        self.setPixmap(make_preview_pixmap(self.mod, expanded.width(), expanded.height()))
+        self._hover_timer.start()
         super().enterEvent(event)
 
     def leaveEvent(self, event) -> None:
-        normal_width = self.base_width
-        normal_height = self.base_height
-        current = self.geometry()
-        self.setGeometry(current.center().x() - normal_width // 2, current.center().y() - normal_height // 2, normal_width, normal_height)
-        self.setPixmap(make_preview_pixmap(self.mod, normal_width, normal_height))
+        self._hover_timer.stop()
+        if self._popup is not None:
+            self._popup.hide()
         super().leaveEvent(event)
+
+    def _show_large_preview(self) -> None:
+        screen = QApplication.desktop().availableGeometry(self)
+        max_width = min(ui(720), screen.width() - ui(40))
+        max_height = min(ui(540), screen.height() - ui(80))
+        pixmap = make_preview_pixmap(self.mod, max_width, max_height)
+        if self._popup is None:
+            popup = QLabel(None, Qt.Tool | Qt.FramelessWindowHint)
+            popup.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+            popup.setAttribute(Qt.WA_ShowWithoutActivating, True)
+            popup.setAlignment(Qt.AlignCenter)
+            popup.setStyleSheet(
+                "background: #101722; border: 2px solid #5f83b5; padding: 8px;"
+            )
+            self._popup = popup
+        popup = self._popup
+        popup.setPixmap(pixmap)
+        popup.adjustSize()
+
+        source_rect = self.rect()
+        source_top_left = self.mapToGlobal(source_rect.topLeft())
+        source_rect = source_rect.translated(source_top_left - source_rect.topLeft())
+        gap = ui(14)
+        right_x = source_rect.right() + gap
+        left_x = source_rect.left() - popup.width() - gap
+        below_y = source_rect.bottom() + gap
+        above_y = source_rect.top() - popup.height() - gap
+        if right_x + popup.width() <= screen.right() + 1:
+            x = right_x
+            y = max(screen.top(), min(source_rect.center().y() - popup.height() // 2, screen.bottom() - popup.height() + 1))
+        elif left_x >= screen.left():
+            x = left_x
+            y = max(screen.top(), min(source_rect.center().y() - popup.height() // 2, screen.bottom() - popup.height() + 1))
+        elif below_y + popup.height() <= screen.bottom() + 1:
+            x = max(screen.left(), min(source_rect.center().x() - popup.width() // 2, screen.right() - popup.width() + 1))
+            y = below_y
+        elif above_y >= screen.top():
+            x = max(screen.left(), min(source_rect.center().x() - popup.width() // 2, screen.right() - popup.width() + 1))
+            y = above_y
+        else:
+            # Only possible when the preview is larger than the remaining
+            # screen area; clamp it as a final fallback.
+            x = max(screen.left(), min(source_rect.center().x() - popup.width() // 2, screen.right() - popup.width() + 1))
+            y = max(screen.top(), min(source_rect.center().y() - popup.height() // 2, screen.bottom() - popup.height() + 1))
+        popup.move(x, y)
+        popup.show()
+        popup.raise_()
 
 
 class LegacyConflictDialog(QDialog):
@@ -425,10 +471,8 @@ class LegacyConflictCard(QFrame):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(ui(12), ui(12), ui(12), ui(12))
         layout.setSpacing(ui(8))
-        preview = QLabel()
+        preview = HoverPreview(mod, ui(188), ui(104), self)
         preview.setObjectName("conflictPreview")
-        preview.setAlignment(Qt.AlignCenter)
-        preview.setPixmap(make_preview_pixmap(mod))
         layout.addWidget(preview)
         title = QLabel(mod.title or mod.file_name)
         title.setObjectName("cardTitle")
@@ -469,11 +513,8 @@ class ConflictCard(QFrame):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(ui(10), ui(10), ui(10), ui(10))
         layout.setSpacing(ui(5))
-        preview = QLabel()
+        preview = HoverPreview(mod, card_width - ui(20), ui(78), self)
         preview.setObjectName("conflictPreview")
-        preview.setAlignment(Qt.AlignCenter)
-        preview.setFixedHeight(ui(78))
-        preview.setPixmap(make_preview_pixmap(mod, card_width - ui(20), ui(78)))
         layout.addWidget(preview)
         title = TwoLineElidedLabel(mod.title or mod.file_name)
         title.setObjectName("cardTitle")
@@ -2467,6 +2508,11 @@ class MainWindow(QMainWindow):
         if hasattr(self, "toggle_all_button"):
             all_active = bool(self.mods) and all(mod.active for mod in self.mods.values())
             self.toggle_all_button.setText("全部禁用" if all_active else "全部启动")
+            self.toggle_all_button.setIcon(
+                self.style().standardIcon(
+                    QStyle.SP_DialogCancelButton if all_active else QStyle.SP_DialogApplyButton
+                )
+            )
 
     def refresh_collection_combo(self) -> None:
         self._updating_collection_combo = True
@@ -2603,7 +2649,12 @@ class MainWindow(QMainWindow):
         self._selected_collection_names.discard(name)
         self.save_selected_collection_names()
         self.storage.save_collections(self.collections)
-        self.sync_collection_in_background(ModCollection(name=name, mod_ids=[]))
+        addon_dirs = self.configured_addon_directories()
+        if addon_dirs:
+            try:
+                delete_collection_folder(addon_dirs[0], name)
+            except OSError as exc:
+                QMessageBox.warning(self, "删除组合文件失败", f"组合记录已删除，但文件夹删除失败：{exc}")
         self.refresh_collection_combo()
         self.apply_selected_collections()
 

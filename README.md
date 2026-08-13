@@ -215,7 +215,7 @@ my_mod_1234567890.vpk
 ```text
 left4dead2\addons\                 普通 Mod
 left4dead2\addons\workshop\        Steam Workshop Mod
-left4dead2\addons\<组合名>\         保存组合时复制的 VPK 和预览图
+left4dead2\addons\.mods\<组合名>\   保存组合时复制的 VPK 和预览图（`.mods` 默认隐藏）
 left4dead2\addonlist.txt            启动游戏前生成的启用列表
 ```
 
@@ -311,7 +311,7 @@ python -m pip install nuitka
 
 ### 组合切换后没有恢复 Mod
 
-组合恢复只会从 `addons\<组合名>` 读取 `.vpk`、`.jpg`、`.jpeg`、`.png` 和 `.webp` 文件；如果组合目录不存在或文件被移除，程序无法恢复。恢复文件后重新扫描即可建立索引。
+组合恢复只会从 `addons\.mods\<组合名>` 读取 `.vpk`、`.jpg`、`.jpeg`、`.png` 和 `.webp` 文件；`.mods` 会在首次使用时自动创建并在 Windows 中设置为隐藏。如果组合目录不存在或文件被移除，程序无法恢复。恢复文件后重新扫描即可建立索引。
 
 ### 启动游戏后 Mod 状态不符合预期
 
