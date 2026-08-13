@@ -351,7 +351,10 @@ class ModCard(QFrame):
         self.favorite_toggled.emit(self.mod.id)
 
     def set_favorite(self, favorite: bool) -> None:
-        changed = favorite != self.mod.favorite
+        # Compare against the QSS property, not self.mod.favorite: the window
+        # handler may flip mod.favorite before calling this, so comparing the
+        # model would always report "unchanged" and skip the live border update.
+        changed = favorite != (self.property("favorite") == "true")
         self.mod.favorite = favorite
         self.setProperty("favorite", "true" if favorite else "false")
         self.favorite_star.setChecked(favorite)
@@ -1000,7 +1003,9 @@ class AppMessageDialog(QDialog):
 
     def __init__(self, message: str, tone: str = "info", confirm: bool = False, parent=None):
         super().__init__(parent)
-        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+        # WindowStaysOnTopHint keeps the prompt above the card area and any
+        # frameless tool popups (e.g. HoverPreview) so it is never covered.
+        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setModal(True)
         self.setMinimumWidth(ui(390))
@@ -1046,7 +1051,7 @@ class AppInputDialog(QDialog):
 
     def __init__(self, label: str, initial_text: str = "", parent=None):
         super().__init__(parent)
-        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setModal(True)
         self.setFixedWidth(ui(420))
@@ -1135,6 +1140,53 @@ class AppFileDialog:
 QMessageBox = AppMessageBox
 QInputDialog = AppInputBox
 QFileDialog = AppFileDialog
+
+
+class AppToast(QWidget):
+    """Non-modal, auto-dismissing notification shown after background work.
+
+    Unlike AppMessageDialog it never blocks the UI: the user can keep
+    clicking and interacting with the main window while the toast is visible.
+    """
+
+    def __init__(self, message: str, parent=None):
+        super().__init__(parent)
+        self.setWindowFlags(Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.setObjectName("appToast")
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(ui(16), ui(11), ui(16), ui(11))
+        layout.setSpacing(ui(10))
+        icon = QLabel("✓")
+        icon.setObjectName("toastIcon")
+        icon.setFixedSize(ui(22), ui(22))
+        icon.setAlignment(Qt.AlignCenter)
+        layout.addWidget(icon)
+        text = QLabel(message)
+        text.setObjectName("toastText")
+        text.setWordWrap(True)
+        text.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        layout.addWidget(text, 1)
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        # Auto-dismiss so the toast never lingers or blocks the workflow.
+        QTimer.singleShot(3200, self.close)
+
+
+def show_toast(message: str, parent=None) -> None:
+    """Display a non-blocking toast anchored to the bottom-center of the window."""
+    host = parent if isinstance(parent, QWidget) else None
+    toast = AppToast(message, host)
+    toast.setMinimumWidth(ui(240))
+    toast.setMaximumWidth(ui(420))
+    toast.adjustSize()
+    if host is not None:
+        geo = host.geometry()
+        x = geo.x() + (geo.width() - toast.width()) // 2
+        y = geo.y() + geo.height() - toast.height() - ui(28)
+        toast.move(x, y)
+    toast.show()
 class CollectionItemDelegate(QStyledItemDelegate):
     """Paint a compact delete affordance on the right side of each collection."""
 

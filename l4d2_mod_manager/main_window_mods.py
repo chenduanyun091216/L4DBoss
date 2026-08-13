@@ -138,7 +138,21 @@ def scan_mods(self, refresh_all: bool) -> None:
     if not existing_dirs:
         QMessageBox.warning(self, "目录不存在", "未找到游戏的 addons 目录。")
         return
-    self.set_busy(True, "正在扫描游戏 Mod…")
+    # Only block actions that would re-trigger a scan or clobber the in-flight
+    # result (toggling active state). Everything else (launch, save, sync
+    # Steam, open details...) stays usable so the UI never feels frozen.
+    self.choose_button.setEnabled(False)
+    self.refresh_button.setEnabled(False)
+    self.toggle_all_button.setEnabled(False)
+    # Show the shared bottom progress bar (indeterminate) while scanning, so
+    # the page stays interactive and a toast is shown when it finishes.
+    self._progress_owner = "scan"
+    self.steam_sync_widget.show()
+    self.steam_sync_progress.setRange(0, 0)
+    self.steam_sync_progress.setValue(0)
+    label = self.steam_sync_widget.findChild(QLabel, "steamSyncLabel")
+    if label is not None:
+        label.setText("正在扫描游戏 Mod…")
     worker = Worker(scan_mod_directory, existing_dirs, self.mods, refresh_all)
     worker.signals.finished.connect(self.on_scan_finished)
     worker.signals.failed.connect(self.on_worker_failed)
@@ -168,6 +182,9 @@ def on_scan_finished(self, mods: dict[str, Mod]) -> None:
     self._rebuild_conflict_index()
     self.storage.save_mods(self.mods)
     self.refresh_cards(); self.refresh_stats(); self.set_busy(False)
+    total = len(self.mods)
+    active = sum(1 for mod in self.mods.values() if mod.active)
+    self._finish_with_message(f"已扫描完成，共发现 {total} 个 Mod（其中 {active} 个已启用）。", "scan")
 
 
 def launch_game(self) -> None:
@@ -219,20 +236,14 @@ def fetch_steam_info(self) -> None:
         self.cancel_steam_sync()
         return
     if not self.mods:
-        QMessageBox.information(self, "暂无 Mod", "请先扫描 Mod 文件夹。")
+        show_toast("请先扫描 Mod 文件夹。", self)
         return
     # A full rescan creates fresh Mod objects.  Hydrate those from the
     # persisted cache before deciding which items still need a request.
     self._apply_steam_cache(self.mods)
     pending_mods = steam_sync_candidates(self.mods)
     if not pending_mods:
-        QMessageBox.information(self, "Steam 信息已是最新", "所有可识别的 Workshop Mod 都已有本地 Steam 数据，无需重新请求。")
-        return
-    if QMessageBox.question(
-        self,
-        "开始同步 Steam 信息",
-        f"将从 Steam 获取 {len(pending_mods)} 个尚未同步的 Mod 信息。已有本地数据的 Mod 不会重新请求。点击“确定”后将在后台继续执行，你可以继续进行其他操作。",
-    ) != QMessageBox.Yes:
+        show_toast("所有可识别的 Workshop Mod 都已有本地 Steam 数据，无需重新请求。", self)
         return
     self.steam_sync_in_progress = True
     self._progress_owner = "steam"

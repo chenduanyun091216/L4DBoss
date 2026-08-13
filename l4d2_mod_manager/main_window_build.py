@@ -32,6 +32,7 @@ from .steam_client import SteamClient
 from .storage import AppStorage
 from .vpk_scanner import is_conflict_relevant_path, scan_mod_directory
 from .theme import *
+from . import theme
 from .components import *
 
 
@@ -580,8 +581,11 @@ def _build_footer(self) -> QWidget:
 
 
 def _apply_style(self) -> None:
-    global ACTIVE_THEME
-    ACTIVE_THEME = self._theme
+    # Mutate the canonical ACTIVE_THEME in the theme module so that
+    # theme_color() (which reads theme.ACTIVE_THEME) reflects the switch.
+    # A plain ``global`` here would only rebind this module's star-imported
+    # copy and leave painted widgets stuck on the previous theme.
+    theme.ACTIVE_THEME = self._theme
     app = QApplication.instance()
     if app is not None:
         app.setStyleSheet(THEMES.get(self._theme, THEMES["dark"]))

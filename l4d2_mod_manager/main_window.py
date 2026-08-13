@@ -384,6 +384,8 @@ from .main_window_steam import (
     on_steam_cancelled,
     _reset_steam_sync_controls,
     _set_steam_sync_status,
+    _finish_with_message,
+    _hide_status_message,
 )
 
 MainWindow.sync_single_mod_steam = sync_single_mod_steam
@@ -393,6 +395,8 @@ MainWindow.cancel_steam_sync = cancel_steam_sync
 MainWindow.on_steam_cancelled = on_steam_cancelled
 MainWindow._reset_steam_sync_controls = _reset_steam_sync_controls
 MainWindow._set_steam_sync_status = _set_steam_sync_status
+MainWindow._finish_with_message = _finish_with_message
+MainWindow._hide_status_message = _hide_status_message
 
 from .main_window_conflicts import (
     show_conflicts,

@@ -333,8 +333,9 @@ def _columns_for_card_size(self, preferred: int) -> int:
 def card_columns(self) -> int:
     width = self._card_viewport_width()
     spacing = self.cards_layout.horizontalSpacing() if hasattr(self, "cards_layout") else ui(11)
-    # Four compact cards should fit in the default window.  Cards expand to
-    # use any extra room, so the final column never leaves a large dead area.
+    # Cards expand to use any extra room, so the final column never leaves a
+    # large dead area. The default window shows about five cards per row and a
+    # maximized window about eight, governed by _card_size below.
     preferred = getattr(self, "_card_size", ui(214))
     return max(1, (width + spacing) // (preferred + spacing))
 

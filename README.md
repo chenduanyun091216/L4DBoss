@@ -15,16 +15,22 @@
 - 武器分类细化到 AK-47、M16、SCAR、SG552、SPAS-12、MP5、AWP 等具体目标。
 - 搜索、分页、仅查看已启用 Mod，以及按分类筛选。
 - 点击卡片或卡片按钮快速启用/禁用 Mod。
+- 点击卡片上的星标收藏 Mod，收藏状态会随卡片高亮保存。
+- 调整卡片显示尺寸以适应不同数量的 Mod。
 - 对已启用 Mod 检查资源路径重复，并显示冲突组和冲突原因。
 - 从 Steam Workshop 获取名称、作者、订阅数、评分、描述和标签。
-- 保存、切换和另存为 Mod 组合。
+- 保存、切换和另存为 Mod 组合，组合下拉框支持同时选择多个组合。
 - 将组合中的 VPK 和预览图同步到同名组合目录，便于备份和恢复。
 - 写入 `addonlist.txt`，并通过“启动游戏”按钮启动 Steam 或游戏程序。
-- 支持高分屏显示和后台扫描/同步任务。
+- 内置多种界面主题，可点击主题按钮随时切换。
+- 无边框窗口设计，支持最小化、最大化/还原和关闭，以及高分屏显示。
+- 支持后台扫描/同步任务，操作过程中界面仍可正常浏览。
 
 ## 界面说明
 
-![img.png](files/img.png)
+![img_1.png](files/img_1.png)
+
+![img_2.png](files/img_2.png)
 
 ### 顶部工具栏
 
@@ -33,6 +39,9 @@
 - **重新扫描全部**：清除当前 Mod 元数据后重新读取所有 VPK。适合文件被大量替换、分类缓存异常或需要重新建立索引时使用。
 - **同步 Steam**：批量获取可识别的 Workshop Mod 信息。已经同步并缓存过的 Mod 默认不会重复请求。
 - **分类模式开关**：在简单分类和 Steam 风格详细分类之间切换。
+- **主题按钮**：在暗色、亮色等多种界面主题之间切换，选择结果会被记住。
+- **最小化 / 最大化 / 关闭**：窗口控制按钮（程序使用无边框窗口，由这几个按钮控制窗口状态）。
+- **关于**：打开关于对话框，查看版本与项目信息。
 
 ### 左侧分类栏
 
@@ -54,15 +63,18 @@ Steam 风格分类会进一步展示武器、角色、感染者、地图、脚�
 
 - 点击卡片：切换启用状态。
 - **启用 Mod/禁用 Mod**：只改变当前管理器中的启用状态，并立即保存。
+- **★ 收藏**：点击卡片上的星标收藏/取消收藏 Mod，收藏的卡片会有高亮边框，状态会保存。
 - **STEAM** 标签：打开对应的 Steam Workshop 页面。
 - **本地** 标签：打开 Mod 所在文件夹。
 - 鼠标悬停预览图：查看放大的预览图。
 - 右键卡片：查看源文件、详细信息、同步当前 Mod 的 Steam 信息、删除 Mod，或将 Mod 加入已保存组合。
+- 卡片尺寸：可通过界面控件调整卡片大小，以适配大批量 Mod 的浏览。
 
 卡片边框颜色含义如下：
 
 - 绿色：Mod 已启用。
 - 红色：Mod 已启用且存在资源冲突。
+- 黄色星标高亮：Mod 已被收藏。
 - 普通深色：Mod 未启用。
 
 ## 安装与运行
@@ -194,7 +206,7 @@ my_mod_1234567890.vpk
 
 如果当前已经选中一个组合，点击 **保存** 会更新该组合；点击 **另存为** 可以创建一个新的组合。
 
-组合下拉框支持选择一个或多个组合。切换组合时，程序会尝试从组合文件夹恢复缺失的 VPK 和预览图，然后重新扫描并启用组合中记录的 Mod。
+组合下拉框支持同时选中多个组合。切换组合时，程序会尝试从组合文件夹恢复缺失的 VPK 和预览图，然后重新扫描并启用所选组合中记录的 Mod；多个组合叠加时，取并集。
 
 组合名称中的 Windows 非法文件名字符会被替换为下划线；名称不能是 `workshop`、`.` 或 `..`。
 
@@ -245,20 +257,33 @@ left4dead2\addonlist.txt            启动游戏前生成的启用列表
 ```text
 L4DBoss/
 ├─ l4d2_mod_manager/
-│  ├─ app.py              PyQt5 主窗口、界面和交互逻辑
-│  ├─ categories.py       分类树和自动分类规则
-│  ├─ collection_sync.py  组合文件复制与恢复
-│  ├─ models.py           Mod、ModCollection 数据模型
-│  ├─ steam_client.py     Steam Workshop API/页面请求
-│  ├─ storage.py          JSON 数据持久化
-│  └─ vpk_scanner.py      VPK 扫描、解析和冲突检测
-├─ files/                 界面背景、标题图和图标
-├─ tests/                 单元测试
-├─ docs/                  需求和补充文档
-├─ requirements.txt       Python 依赖
-├─ run.py                 程序入口
-└─ pack                   Nuitka 打包命令
+│  ├─ app.py               应用入口，仅负责创建 QApplication 与主窗口
+│  ├─ main_window.py       MainWindow 基类、状态初始化与各子模块方法挂载
+│  ├─ main_window_build.py 界面构建、标题栏、主题菜单、窗口控制、底部状态栏
+│  ├─ main_window_cards.py 分类树、卡片渲染、搜索/分页/筛选、冲突索引
+│  ├─ main_window_mods.py  选择/查找游戏、扫描、启用禁用、启动游戏
+│  ├─ main_window_collections.py  Mod 组合保存/切换/恢复、addonlist 写入
+│  ├─ main_window_steam.py Steam 信息同步（批量与单个）及取消
+│  ├─ main_window_conflicts.py    冲突报告构建与展示
+│  ├─ main_window_details.py      卡片右键菜单、详情、删除、Mod 列表视图
+│  ├─ main_window_events.py       后台任务失败、窗口事件与高分屏处理
+│  ├─ components.py        基础组件，含 ModCard 卡片与收藏星标
+│  ├─ theme.py             主题调色板、样式与图标常量
+│  ├─ categories.py        分类树和自动分类规则
+│  ├─ collection_sync.py   组合文件复制与恢复
+│  ├─ models.py            Mod、ModCollection 数据模型
+│  ├─ steam_client.py      Steam Workshop API/页面请求
+│  ├─ storage.py           JSON 数据持久化
+│  └─ vpk_scanner.py       VPK 扫描、解析和冲突检测
+├─ files/                  界面背景、标题图、图标与截图
+├─ tests/                  单元测试
+├─ docs/                   需求和补充文档
+├─ requirements.txt        Python 依赖
+├─ run.py                  程序入口
+└─ pack                    Nuitka 打包命令
 ```
+
+> 说明：原 `app.py` 中的主窗口实现已拆分为 `main_window.py` 与若干 `main_window_*.py` 子模块，便于维护；`app.py` 现仅作为启动入口。
 
 ## 开发和测试
 

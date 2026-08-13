@@ -76,9 +76,6 @@ def on_steam_finished(self, mods: dict[str, Mod]) -> None:
             setattr(local, field, getattr(updated, field))
     self.steam_sync_in_progress = False
     self._reset_steam_sync_controls()
-    if self._progress_owner == "steam":
-        self._progress_owner = None
-        self.steam_sync_widget.hide()
     self._simple_category_cache.clear()
     self._card_cache.clear()
     self.storage.save_mods(self.mods)
@@ -86,7 +83,7 @@ def on_steam_finished(self, mods: dict[str, Mod]) -> None:
     self.refresh_cards()
     self.refresh_tree()
     self.refresh_stats()
-    QMessageBox.information(self, "Steam 同步完成", "Steam 信息已获取完成，页面已刷新。")
+    self._finish_with_message("Steam 信息已获取完成，页面已刷新。", "steam")
 
 
 def on_steam_failed(self, message: str) -> None:
@@ -114,10 +111,7 @@ def cancel_steam_sync(self) -> None:
 def on_steam_cancelled(self) -> None:
     self.steam_sync_in_progress = False
     self._reset_steam_sync_controls()
-    if self._progress_owner == "steam":
-        self._progress_owner = None
-        self.steam_sync_widget.hide()
-    QMessageBox.information(self, "Steam 同步已取消", "已停止后续 Mod 的 Steam 数据同步。")
+    self._finish_with_message("已停止后续 Mod 的 Steam 数据同步。", "steam")
 
 
 def _reset_steam_sync_controls(self) -> None:
@@ -136,4 +130,30 @@ def _set_steam_sync_status(self, completed: int, total: int) -> None:
     label = self.steam_sync_widget.findChild(QLabel, "steamSyncLabel")
     if label is not None:
         label.setText(f"正在同步 Steam 数据… {completed}/{total}（{percent}%）")
+
+
+def _finish_with_message(self, text: str, owner: str) -> None:
+    """Replace the bottom progress bar with a completion message in its place.
+
+    The progress bar is hidden and the label shows the result, keeping the UI
+    non-blocking. After a short delay the whole bar is dismissed (unless a new
+    operation has reused it).
+    """
+    if self._progress_owner != owner:
+        return
+    self._progress_owner = None
+    self.steam_sync_progress.hide()
+    label = self.steam_sync_widget.findChild(QLabel, "steamSyncLabel")
+    if label is not None:
+        label.setText(text)
+    self.steam_sync_widget.show()
+    QTimer.singleShot(3200, self._hide_status_message)
+
+
+def _hide_status_message(self) -> None:
+    if self._progress_owner is not None:
+        # A new scan/sync reused the bar; leave it to that operation.
+        return
+    self.steam_sync_progress.show()
+    self.steam_sync_widget.hide()
 

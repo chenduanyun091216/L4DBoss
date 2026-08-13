@@ -37,6 +37,9 @@ from .components import *
 
 def on_worker_failed(self, message: str) -> None:
     self.set_busy(False)
+    if getattr(self, "_progress_owner", None) == "scan":
+        self._progress_owner = None
+        self.steam_sync_widget.hide()
     QMessageBox.critical(self, "操作失败", message)
 
 

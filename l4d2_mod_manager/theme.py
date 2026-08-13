@@ -60,7 +60,7 @@ THEME_PALETTE: dict[str, dict[str, str]] = {
         "panel": "#121826",
         "panel_border": "#5f83b5",
         "tree_default": "#687384",
-        "tree_favorite": "#f1c2c7",
+        "tree_favorite": "#f5b301",
         "tree_expand": "#9fb2ce",
         "toggle_off_border": "#4a5d78",
         "toggle_off_fill": "#35445a",
@@ -74,7 +74,7 @@ THEME_PALETTE: dict[str, dict[str, str]] = {
         "panel": "#f4f8fd",
         "panel_border": "#7fa6e2",
         "tree_default": "#8a94a6",
-        "tree_favorite": "#d9646f",
+        "tree_favorite": "#c98a00",
         "tree_expand": "#5a6a82",
         "toggle_off_border": "#b9c6d8",
         "toggle_off_fill": "#c7d3e4",
@@ -177,10 +177,10 @@ THEMES = {
     #modCardConflict { border: 2px solid #ff4757; background: #481923; }
     #modCardConflict:hover { background: #5a1d29; border: 2px solid #ff7885; }
     #modCard[favorite="true"], #modCardActive[favorite="true"], #modCardConflict[favorite="true"] {
-        border: 2px solid #f04455;
+        border: 2px solid #f5b301;
     }
     #modCard[favorite="true"]:hover, #modCardActive[favorite="true"]:hover, #modCardConflict[favorite="true"]:hover {
-        border: 2px solid #ff5a66;
+        border: 2px solid #ffc83d;
     }
     #preview { background: #111821; border-radius: 7px; min-height: 112px; max-height: 112px; }
     #cardTitle { color: #f2f6fc; font-size: 13px; font-weight: 700; line-height: 1.32; }
@@ -195,8 +195,8 @@ THEMES = {
     #tagButton { border: 0; }
     #tagButton:hover { border: 1px solid #d8e7ff; padding: 0 5px; }
     #favoriteStar { background: transparent; border: none; color: #6c7c93; font-size: 18px; font-weight: 700; padding: 0; }
-    #favoriteStar:hover { color: #ff5a6a; }
-    #favoriteStar:checked { color: #ff3b4d; text-shadow: 0 0 8px rgba(240, 68, 85, 0.9); }
+    #favoriteStar:hover { color: #ffc83d; }
+    #favoriteStar:checked { color: #f5b301; }
     #emptyText { color: #9db2d0; background: transparent; border: 0; padding: 0; font-size: 15px; font-weight: 500; line-height: 1.7; letter-spacing: 0.5px; }
     #paginationBar { min-height: 22px; }
     #paginationButton { min-height: 0; max-height: 22px; color: #cbd7e8; background: #253247; border: 1px solid #34445c; border-radius: 5px; padding: 0 9px; font-size: 11px; }
@@ -265,6 +265,9 @@ THEMES = {
     #promptIconWarning { background: #a66d24; border: 1px solid #e5a34a; }
     #promptIconError { background: #a93f4c; border: 1px solid #ed7681; }
     #promptInput { min-height: 34px; background: #111a26; color: #eef5ff; border: 1px solid #3a4a61; border-radius: 7px; padding: 0 10px; }
+    #appToast { background: #18212e; border: 1px solid #3a4a61; border-radius: 10px; }
+    #toastIcon { color: white; background: #2f9e63; border-radius: 11px; font-size: 13px; font-weight: 800; }
+    #toastText { color: #e5edf9; font-size: 13px; line-height: 1.5; }
     #promptInput:focus { background: #162131; border-color: #5486ec; }
     #promptPrimaryButton, #promptSecondaryButton { min-height: 32px; border-radius: 6px; padding: 0 15px; font-weight: 700; }
     #promptPrimaryButton { background: #2d65d6; color: white; border: 1px solid #3d78e7; }
@@ -364,10 +367,10 @@ THEMES = {
     #modCardConflict { border: 2px solid #d8363f; background: rgba(250, 211, 216, 255); }
     #modCardConflict:hover { background: #f8c6cc; border: 2px solid #c52832; }
     #modCard[favorite="true"], #modCardActive[favorite="true"], #modCardConflict[favorite="true"] {
-        border: 2px solid #d8363f;
+        border: 2px solid #c98a00;
     }
     #modCard[favorite="true"]:hover, #modCardActive[favorite="true"]:hover, #modCardConflict[favorite="true"]:hover {
-        border: 2px solid #ff4757;
+        border: 2px solid #f5b301;
     }
     #preview { background: #eef2f8; border-radius: 7px; min-height: 112px; max-height: 112px; }
     #cardTitle { color: #1d2b43; font-size: 13px; font-weight: 700; line-height: 1.32; }
@@ -382,8 +385,8 @@ THEMES = {
     #tagButton { border: 0; }
     #tagButton:hover { border: 1px solid #7fa6e2; padding: 0 5px; }
     #favoriteStar { background: transparent; border: none; color: #b3bccb; font-size: 18px; font-weight: 700; padding: 0; }
-    #favoriteStar:hover { color: #ff5a6a; }
-    #favoriteStar:checked { color: #ff3b4d; text-shadow: 0 0 8px rgba(240, 68, 85, 0.85); }
+    #favoriteStar:hover { color: #f5b301; }
+    #favoriteStar:checked { color: #c98a00; }
     #emptyText { color: #5f718e; background: transparent; border: 0; padding: 0; font-size: 15px; font-weight: 500; line-height: 1.7; letter-spacing: 0.5px; }
     #paginationBar { min-height: 22px; }
     #paginationButton { min-height: 0; max-height: 22px; color: #3c4e6b; background: #e9eef7; border: 1px solid #aab6c8; border-radius: 5px; padding: 0 9px; font-size: 11px; }
@@ -453,6 +456,9 @@ THEMES = {
     #promptIconError { background: #a93f4c; border: 1px solid #ed7681; }
     #promptInput { min-height: 34px; background: #ffffff; color: #1d2b43; border: 1px solid #aab6c8; border-radius: 7px; padding: 0 10px; }
     #promptInput:focus { background: #ffffff; border-color: #2d65d6; }
+    #appToast { background: #ffffff; border: 1px solid #aab6c8; border-radius: 10px; }
+    #toastIcon { color: white; background: #2f9e63; border-radius: 11px; font-size: 13px; font-weight: 800; }
+    #toastText { color: #2a3a54; font-size: 13px; line-height: 1.5; }
     #promptPrimaryButton, #promptSecondaryButton { min-height: 32px; border-radius: 6px; padding: 0 15px; font-weight: 700; }
     #promptPrimaryButton { background: #2d65d6; color: white; border: 1px solid #3d78e7; }
     #promptPrimaryButton:hover { background: #3c78ee; border-color: #6297f3; }
