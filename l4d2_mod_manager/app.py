@@ -2194,7 +2194,10 @@ class MainWindow(QMainWindow):
         self.content_back_button.clicked.connect(self.show_mod_list)
         self.content_back_button.hide()
         layout.addWidget(self.content_back_button)
-        title_box = QVBoxLayout()
+        self.content_title_host = QWidget()
+        self.content_title_host.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
+        title_box = QVBoxLayout(self.content_title_host)
+        title_box.setContentsMargins(0, 0, 0, 0)
         title_box.setSpacing(1)
         self.content_title = QLabel("全部 Mod")
         self.content_title.setObjectName("contentTitle")
@@ -2202,7 +2205,7 @@ class MainWindow(QMainWindow):
         self.content_subtitle.setObjectName("contentSubtitle")
         title_box.addWidget(self.content_title)
         title_box.addWidget(self.content_subtitle)
-        layout.addLayout(title_box)
+        layout.addWidget(self.content_title_host)
         layout.addStretch(1)
         self.search_input = QLineEdit()
         self.search_input.setObjectName("searchInput")
@@ -2218,12 +2221,12 @@ class MainWindow(QMainWindow):
         self.collection_combo.view().setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.collection_combo.selection_changed.connect(self.on_collection_selection_changed)
         self.collection_combo.collection_delete_requested.connect(self.delete_collection)
-        filter_controls = QHBoxLayout()
-        filter_controls.setContentsMargins(0, 0, 0, 0)
-        filter_controls.setSpacing(ui(11))
-        filter_controls.addWidget(self.search_input)
-        filter_controls.addWidget(self.collection_combo)
-        layout.addLayout(filter_controls)
+        self._filter_controls = QHBoxLayout()
+        self._filter_controls.setContentsMargins(0, 0, 0, 0)
+        self._filter_controls.setSpacing(ui(11))
+        self._filter_controls.addWidget(self.search_input)
+        self._filter_controls.addWidget(self.collection_combo)
+        layout.addLayout(self._filter_controls)
         return bar
 
     def _build_footer_legacy(self) -> QWidget:
@@ -2672,12 +2675,21 @@ class MainWindow(QMainWindow):
             control_width = self.card_width(self.card_columns())
             self.collection_combo.setFixedWidth(control_width)
             # Keep the combo box anchored to the card grid's right edge, then
-            # derive the search width from the actual header button position.
-            # This keeps their left borders aligned at every window size.
+            # derive the search width from the combo box's stable left edge.
+            # Using the search box's previous geometry here can retain a stale
+            # oversized width during the first layout pass.
             if hasattr(self, "choose_button"):
-                search_right = self.search_input.mapToGlobal(QPoint(self.search_input.width(), 0)).x()
+                self.content_bar.layout().activate()
+                search_right = self.collection_combo.mapToGlobal(QPoint(0, 0)).x() - self.cards_layout.horizontalSpacing()
                 target_left = self.choose_button.mapToGlobal(QPoint(0, 0)).x()
+                content_left = self.content_bar.mapToGlobal(QPoint(0, 0)).x()
+                bar_gap = self.content_bar.layout().spacing()
+                self.content_title_host.setFixedWidth(max(ui(1), target_left - content_left - bar_gap))
                 self.search_input.setFixedWidth(max(ui(160), search_right - target_left))
+                self._filter_controls.invalidate()
+                self.content_bar.layout().invalidate()
+                self.content_bar.layout().activate()
+                self._filter_controls.activate()
         if hasattr(self, "_footer_action_buttons") and hasattr(self, "_header_action_buttons"):
             grid_gap = self.cards_layout.horizontalSpacing()
             self.action_host.layout().setSpacing(grid_gap)
