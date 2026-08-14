@@ -601,7 +601,7 @@ class BackgroundSurface(QWidget):
             scaled = self._background.scaled(self.size(), Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
             x = (self.width() - scaled.width()) // 2
             y = (self.height() - scaled.height()) // 2
-            painter.setOpacity(0.09)
+            painter.setOpacity(theme_bg_opacity())
             painter.drawPixmap(x, y, scaled)
         painter.end()
 class LegacyConflictCard(QFrame):

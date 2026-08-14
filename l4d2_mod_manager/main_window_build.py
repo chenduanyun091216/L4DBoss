@@ -68,10 +68,12 @@ def _build_ui(self) -> None:
     caption_row.addWidget(self.category_mode_switch)
     side_layout.addLayout(caption_row)
     self.category_tree = QTreeWidget()
+    self.category_tree.setObjectName("categoryTree")
     self.category_tree.setHeaderHidden(True)
     self.category_tree.setIndentation(ui(22))
     self.category_tree.setUniformRowHeights(True)
     self.category_tree.itemSelectionChanged.connect(self.on_category_selected)
+    self.category_tree.itemSelectionChanged.connect(self._refresh_tree_foregrounds)
     side_layout.addWidget(self.category_tree, 1)
     body.addWidget(sidebar)
 
@@ -91,7 +93,11 @@ def _build_ui(self) -> None:
     self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
     self.scroll.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
     self.scroll.viewport().setObjectName("cardsViewport")
-    self._cards_loading_overlay = QFrame(self.scroll)
+    # The overlay must live inside the scroll viewport (sibling of the
+    # cards host), not directly under the QScrollArea: QScrollArea keeps
+    # its viewport above every other child, so a scroll-area child would
+    # always be painted beneath the card grid.
+    self._cards_loading_overlay = QFrame(self.scroll.viewport())
     self._cards_loading_overlay.setObjectName("cardsLoadingOverlay")
     loading_layout = QVBoxLayout(self._cards_loading_overlay)
     loading_layout.setContentsMargins(0, 0, 0, 0)
@@ -253,6 +259,9 @@ def _build_header(self) -> QWidget:
     for button in (self.choose_button, self.refresh_button, self.fetch_button):
         button.installEventFilter(self)
     self.toggle_all_button = self._header_button(QStyle.SP_DialogApplyButton, "全部启动", self.toggle_all_mods)
+    # 虽然创建于头部，但最终被加入底部操作栏；用独立 objectName
+    # 以便钛色灰主题将底部四个按钮统一样式为“幽灵绿”风格。
+    self.toggle_all_button.setObjectName("toggleAllButton")
     layout.addWidget(self.toggle_all_button)
     self.theme_button = self._header_button(
         QStyle.SP_DesktopIcon, "", self._open_theme_menu,

@@ -115,6 +115,54 @@ def refresh_tree(self) -> None:
         self._tree_rebuilding = False
 
 
+def _tree_item_color(self, depth: int, is_leaf: bool) -> QColor:
+    """Normal-state (unselected) text color for a category tree item.
+
+    The titanium theme keeps its sidebar transparent over the (now stronger)
+    wallpaper, so its tree text uses light tones for contrast; the light
+    theme keeps dark tones on its near-white background.
+    """
+    if self._theme == "titanium":
+        if is_leaf:
+            return QColor("#9fc3ff" if depth == 0 else "#d2dbe8")
+        return QColor("#e6edf6")
+    if is_leaf:
+        if depth == 0:
+            return QColor(theme_color("link"))
+        if self._theme == "light":
+            return QColor("#212a36")
+        return QColor(theme_color("tree_default"))
+    if self._theme == "light":
+        return QColor("#181f2a")
+    return QColor(theme_color("link") if depth == 0 else theme_color("tree_default"))
+
+
+def _refresh_tree_foregrounds(self) -> None:
+    """Re-apply tree item text colors after selection changes.
+
+    Items own an explicit foreground (setForeground), which overrides the
+    stylesheet color even on the selected state, so when a row is selected
+    (earth-yellow background) switch its text to a dark tone to stay
+    readable, and restore the hierarchy color once deselected.
+
+    Note: QTreeWidgetItem is not hashable in PyQt5, so the selected items
+    are compared by list membership (sip `==` compares the C++ pointers)
+    instead of building a set.
+    """
+    selected = self.category_tree.selectedItems()
+    stack = [self.category_tree.topLevelItem(i) for i in range(self.category_tree.topLevelItemCount())]
+    while stack:
+        item = stack.pop()
+        if item is None:
+            continue
+        if item in selected:
+            item.setForeground(0, QColor("#241c08"))
+        else:
+            item.setForeground(0, self._tree_item_color(item.data(0, Qt.UserRole + 1) or 0, item.childCount() == 0))
+        for index in range(item.childCount()):
+            stack.append(item.child(index))
+
+
 def _make_tree_item(self, entry, depth: int) -> QTreeWidgetItem:
     if isinstance(entry, tuple):
         item = QTreeWidgetItem([entry[1]])
@@ -123,14 +171,7 @@ def _make_tree_item(self, entry, depth: int) -> QTreeWidgetItem:
         child_font = QFont(self.category_tree.font())
         child_font.setPointSize(max(9, child_font.pointSize() - (1 if depth > 1 else 0)))
         item.setFont(0, child_font)
-        # Leaf (no children): top-level stays blue; on the light theme
-        # leaves use a mid gray to balance the darker parent titles.
-        if depth == 0:
-            item.setForeground(0, QColor(theme_color("link")))
-        elif self._theme == "light":
-            item.setForeground(0, QColor("#6b7589"))
-        else:
-            item.setForeground(0, QColor(theme_color("tree_default")))
+        item.setForeground(0, self._tree_item_color(depth, True))
         return item
     item = QTreeWidgetItem([entry["label"]])
     item.setData(0, Qt.UserRole, entry["id"])
@@ -139,12 +180,7 @@ def _make_tree_item(self, entry, depth: int) -> QTreeWidgetItem:
     root_font.setBold(depth == 0 or (self.category_mode == "simple" and depth == 1))
     root_font.setPointSize(max(10, root_font.pointSize() + (1 if depth == 0 else 0)))
     item.setFont(0, root_font)
-    # Branches (have children): on the light theme every parent title uses
-    # a soft dark gray; other themes keep top-level blue and deeper levels gray.
-    if self._theme == "light":
-        item.setForeground(0, QColor("#44506a"))
-    else:
-        item.setForeground(0, QColor(theme_color("link") if depth == 0 else theme_color("tree_default")))
+    item.setForeground(0, self._tree_item_color(depth, False))
     for child in entry.get("children", []):
         item.addChild(self._make_tree_item(child, depth + 1))
     return item
@@ -364,7 +400,7 @@ def _card_viewport_width(self) -> int:
 def _show_cards_loading(self) -> None:
     if not hasattr(self, "_cards_loading_overlay"):
         return
-    self._cards_loading_overlay.setGeometry(self.scroll.rect())
+    self._cards_loading_overlay.setGeometry(self.scroll.viewport().rect())
     self._cards_loading_overlay.raise_()
     self._cards_loading_overlay.show()
     self._cards_loading_timer.start(120)

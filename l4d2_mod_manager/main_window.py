@@ -235,6 +235,8 @@ from .main_window_cards import (
     _refresh_card_states,
     refresh_tree,
     _make_tree_item,
+    _tree_item_color,
+    _refresh_tree_foregrounds,
     on_category_mode_switch_changed,
     refresh_cards,
     _populate_cards_batch,
@@ -269,6 +271,8 @@ MainWindow._update_conflicts_for_toggle = _update_conflicts_for_toggle
 MainWindow._refresh_card_states = _refresh_card_states
 MainWindow.refresh_tree = refresh_tree
 MainWindow._make_tree_item = _make_tree_item
+MainWindow._tree_item_color = _tree_item_color
+MainWindow._refresh_tree_foregrounds = _refresh_tree_foregrounds
 MainWindow.on_category_mode_switch_changed = on_category_mode_switch_changed
 MainWindow.refresh_cards = refresh_cards
 MainWindow._populate_cards_batch = _populate_cards_batch

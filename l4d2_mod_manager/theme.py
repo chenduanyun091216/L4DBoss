@@ -83,6 +83,20 @@ THEME_PALETTE: dict[str, dict[str, str]] = {
         "toggle_knob": "#ffffff",
         "link": "#2d65d6",
     },
+    "titanium": {
+        "surface": "#9a9ea4",
+        "panel": "#adb1b7",
+        "panel_border": "#6d7278",
+        "tree_default": "#3a4149",
+        "tree_favorite": "#c98a00",
+        "tree_expand": "#4a5058",
+        "toggle_off_border": "#8b9097",
+        "toggle_off_fill": "#a7abb1",
+        "toggle_on_border": "#4d83eb",
+        "toggle_on_fill": "#2d65d6",
+        "toggle_knob": "#ffffff",
+        "link": "#1a3a7e",
+    },
 }
 
 
@@ -92,14 +106,31 @@ def theme_color(key: str, fallback_theme: str = "dark") -> str:
     return palette.get(key, THEME_PALETTE[fallback_theme][key])
 
 
+# Opacity of the full-window background image per theme. Higher values make
+# the wallpaper stand out more; keep it low enough for text/panels to stay
+# readable. Consumed by BackgroundSurface.paintEvent.
+THEME_BG_OPACITY = {
+    "dark": 0.16,
+    "titanium": 0.55,
+    "light": 0.14,
+}
+
+
+def theme_bg_opacity(fallback_theme: str = "dark") -> float:
+    """Opacity used to paint the full-window background image."""
+    return THEME_BG_OPACITY.get(ACTIVE_THEME, THEME_BG_OPACITY[fallback_theme])
+
+
 # Ordered list of selectable themes (label shown in the theme switcher).
-THEME_ORDER = ["dark", "light"]
+THEME_ORDER = ["dark", "titanium", "light"]
 THEME_LABELS = {
     "dark": "深渊蓝",
+    "titanium": "钛色灰",
     "light": "晴空白",
 }
 THEME_HINTS = {
     "dark": "深渊蓝：深色背景，护眼低亮，适合夜间使用",
+    "titanium": "钛色灰：中性灰色调，介于深蓝与晴白之间，质感内敛，背景图更突出",
     "light": "晴空白：浅色背景，明亮清晰，适合白天使用",
 }
 
@@ -139,6 +170,7 @@ THEMES = {
     QTreeWidget::item { min-height: 24px; border-radius: 6px; padding: 2px 6px; }
     QTreeWidget::item:hover { background: #212b3a; color: #f2f6fc; }
     QTreeWidget::item:selected { background: #2b5fca; color: white; font-weight: 700; }
+    QTreeWidget#categoryTree::item:selected { background: #c9a227; color: #241c08; font-weight: 700; }
     QScrollArea { border: 0; background: transparent; }
     #cardsScroll, #cardsViewport, #cardsHost { background: transparent; }
     #cardsLoadingOverlay { background: rgba(10, 15, 24, 80); }
@@ -329,6 +361,7 @@ THEMES = {
     QTreeWidget::item { min-height: 24px; border-radius: 6px; padding: 2px 6px; }
     QTreeWidget::item:hover { background: #e2e9f7; color: #1c2f4e; }
     QTreeWidget::item:selected { background: #91b9ee; color: #1f4fa3; font-weight: 700; }
+    QTreeWidget#categoryTree::item:selected { background: #c9a227; color: #241c08; font-weight: 700; }
     QScrollArea { border: 0; background: transparent; }
     #cardsScroll, #cardsViewport, #cardsHost { background: transparent; }
     #cardsLoadingOverlay { background: rgba(240, 244, 250, 90); }
@@ -486,4 +519,198 @@ THEMES = {
     QFileDialog QTreeView::item:selected, QFileDialog QListView::item:selected, QFileDialog QSidebar::item:selected { background: #2d65d6; color: white; }
     QFileDialog QComboBox { min-height: 28px; }
     QStatusBar { background: #f0f4fa; color: #64748e; border-top: 1px solid #9aa7ba; }
+""",
+    "titanium": r"""
+    QWidget { font-family: "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei"; }
+    QMainWindow, QDialog { background: transparent; color: #e3eaf4; }
+    #appSurface { background: transparent; border-radius: 14px; }
+    #header { background: transparent; border-bottom: 1px solid #7e848b; border-top-left-radius: 14px; border-top-right-radius: 14px; }
+    #brand { color: #f2f6fc; font-size: 20px; font-weight: 800; letter-spacing: 2px; }
+    #brandButton { color: #f2f6fc; background: transparent; border: 0; padding: 0; font-size: 20px; font-weight: 800; letter-spacing: 2px; text-align: left; }
+    #brandButton:hover { color: #9fc3ff; }
+    #brandCredit { color: #b9c6d6; font-size: 11px; font-weight: 700; }
+    #brandSub, #contentSubtitle { color: #a9b6c6; font-size: 10px; font-weight: 700; letter-spacing: 1px; }
+    #headerHint { color: #c2cddb; font-size: 11px; font-weight: 600; padding-right: 8px; }
+    #headerButton, #headerButtonSecondary { background: transparent; color: #e3eaf4; border: 1px solid #aab1ba; border-radius: 7px; padding: 8px 13px; font-weight: 700; }
+    #headerButton:hover, #headerButtonSecondary:hover { background: #2d65d6; color: #ffffff; border: 2px solid #2d65d6; }
+    /* 底部四个操作按钮（全部启动/保存/另存为/启动游戏）：透明底 + 国网绿描边，悬浮时背景变为国网绿 */
+    #toggleAllButton, #primaryButton, #secondaryButton, #launchButton { background: transparent; color: #e3eaf4; border: 1px solid #aab1ba; border-radius: 7px; padding: 8px 13px; font-weight: 700; }
+    #toggleAllButton:hover, #primaryButton:hover, #secondaryButton:hover, #launchButton:hover { background: #2d65d6; color: #ffffff; border: 2px solid #2d65d6; }
+    #headerIconButton { background: #39414c; border: 0; border-radius: 7px; padding: 0; }
+    #headerIconButton:hover { background: #2d65d6; border: 0; }
+    QToolTip { color: #e3eaf4; background: #2e3640; border: 1px solid #4a545f; border-radius: 5px; padding: 5px 8px; }
+    #launchButton:disabled { color: #8a94a0; background: transparent; border-color: #4a545f; }
+    #totalModCount, #activeModCount { background: transparent; border: 0; padding: 0; font-weight: 700; }
+    #totalModCount { color: #9fc3ff; }
+    #activeModCount { color: #9fc3ff; }
+    #totalModCount:hover, #activeModCount:hover { text-decoration: underline; }
+    #totalModCount[selected="true"] { border: 1px solid #9fc3ff; border-radius: 6px; padding: 3px 6px; }
+    #activeModCount[selected="true"] { border: 1px solid #9fc3ff; border-radius: 6px; padding: 3px 6px; }
+    #sidebar { background: transparent; border-right: 1px solid #7e848b; }
+    #sectionLabel { color: #c7d1de; font-size: 11px; font-weight: 800; letter-spacing: 1px; }
+    #categorySwitchLabel { color: #d0d9e5; font-size: 11px; font-weight: 700; }
+    #sideHint { color: #c8d3e0; font-size: 11px; line-height: 1.45; padding: 10px; background: #39414c; border-radius: 7px; }
+    QTreeWidget { background: transparent; border: 0; color: #dce5f0; outline: none; font-size: 13px; }
+    QTreeWidget::item { min-height: 24px; border-radius: 6px; padding: 2px 6px; font-weight: 600; }
+    QTreeWidget::item:hover { background: #3a434e; color: #ffffff; }
+    QTreeWidget::item:selected { background: #2d65d6; color: white; font-weight: 700; }
+    QTreeWidget#categoryTree::item:selected { background: #c9a227; color: #241c08; font-weight: 700; }
+    QScrollArea { border: 0; background: transparent; }
+    #cardsScroll, #cardsViewport, #cardsHost { background: transparent; }
+    #cardsLoadingOverlay { background: rgba(24, 30, 38, 110); }
+    #cardsLoadingPanel { background: #39414c; border: 2px solid #5486ec; border-radius: 12px; }
+    #cardsLoadingSpinner { color: #9fc3ff; font-size: 30px; font-weight: 700; }
+    #cardsLoadingLabel { color: #c2cddb; font-size: 13px; font-weight: 700; }
+    QScrollBar:vertical { background: #3a424d; width: 8px; margin: 5px 0 5px 0; border-radius: 4px; }
+    QScrollBar::handle:vertical { background: #656d78; min-height: 42px; border-radius: 4px; }
+    QScrollBar::handle:vertical:hover { background: #7a838f; }
+    QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
+    QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }
+    QScrollBar:horizontal { background: #3a424d; height: 8px; margin: 0 4px 3px 4px; border-radius: 4px; }
+    QScrollBar::handle:horizontal { background: #656d78; min-width: 42px; border-radius: 4px; }
+    QScrollBar::handle:horizontal:hover { background: #7a838f; }
+    QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; }
+    QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal { background: transparent; }
+    #contentTitle { color: #f2f6fc; font-size: 22px; font-weight: 800; }
+    QLineEdit, QComboBox { min-height: 32px; background: #3f4854; color: #e3eaf4; border: 1px solid #56606c; border-radius: 7px; padding: 0 11px; }
+    QLineEdit:focus, QComboBox:focus { border-color: #2d65d6; background: #47505d; }
+    #searchInput { min-width: 235px; }
+    #collectionCombo { padding-left: 12px; padding-right: 30px; font-weight: 600; }
+    #collectionCombo QLineEdit { background: transparent; border: 0; padding: 0; color: #e3eaf4; font-weight: 600; }
+    #collectionCombo:hover { background: #47505d; border-color: #2d65d6; }
+    #collectionCombo::drop-down { subcontrol-origin: padding; subcontrol-position: top right; border: 0; width: 30px; }
+    #collectionComboMenu { background: #39414c; color: #e3eaf4; border: 1px solid #56606c; border-radius: 8px; outline: 0; padding: 5px; selection-background-color: transparent; }
+    #collectionComboMenu::item { min-height: 25px; border: 1px solid transparent; border-radius: 6px; padding: 0 12px; margin: 1px 0; }
+    #collectionComboMenu::item:hover { background: #4a5462; border-color: #2d65d6; color: #ffffff; }
+    #collectionComboMenu::item:selected { background: #2d65d6; border-color: #4d83eb; color: #ffffff; font-weight: 700; }
+    #collectionComboMenu QScrollBar:vertical { background: transparent; width: 7px; margin: 7px 3px 7px 0; }
+    #collectionComboMenu QScrollBar::handle:vertical { background: #656d78; min-height: 30px; border-radius: 3px; }
+    #collectionComboMenu QScrollBar::handle:vertical:hover { background: #7a838f; }
+    #modCard, #modCardActive, #modCardConflict { background: rgba(210, 214, 220, 112); border: 1px solid #8a919b; border-radius: 10px; }
+    #modCard:hover { background: rgba(223, 226, 231, 140); border: 2px solid #7089c0; }
+    #modCardActive { border: 2px solid #4d6aa8; background: rgba(206, 224, 250, 128); }
+    #modCardActive:hover { background: rgba(195, 217, 249, 146); border: 2px solid #40598f; }
+    #modCardConflict { border: 2px solid #a4635f; background: rgba(252, 227, 231, 128); }
+    #modCardConflict:hover { background: rgba(246, 214, 218, 146); border: 2px solid #8d5753; }
+    #modCard[favorite="true"], #modCardActive[favorite="true"], #modCardConflict[favorite="true"] {
+        border: 2px solid #a8893f;
+    }
+    #modCard[favorite="true"]:hover, #modCardActive[favorite="true"]:hover, #modCardConflict[favorite="true"]:hover {
+        border: 2px solid #c5a74e;
+    }
+    #preview { background: #bcc1c9; border-radius: 7px; min-height: 112px; max-height: 112px; }
+    #cardTitle { color: #3c4652; font-size: 13px; font-weight: 700; line-height: 1.32; }
+    #cardMeta { color: #5f6a76; font-size: 10px; }
+    #typeSummary { color: #5f6a76; font-size: 9px; font-weight: 600; padding: 0; }
+    #tag, #tagButton { min-height: 20px; max-height: 20px; color: #ffffff; border-radius: 4px; padding: 0 6px; font-size: 9px; font-weight: 700; }
+    #cardAction, #cardActionActive { min-height: 24px; max-height: 24px; border-radius: 6px; font-size: 11px; font-weight: 700; }
+    #cardAction { color: #3c4652; background: #acb1b8; border: 1px solid #8b929c; }
+    #cardAction:hover { color: white; background: #7d93c4; border: 2px solid #7089c0; }
+    #cardActionActive { color: #4a6399; background: #e4eaf5; border: 1px solid #7d95c4; }
+    #cardActionActive:hover { color: white; background: #a5524e; border: 2px solid #8f4a45; }
+    #tagButton { border: 0; }
+    #tagButton:hover { border: 1px solid #8b929c; padding: 0 5px; }
+    #favoriteStar { background: transparent; border: none; color: #969da7; font-size: 18px; font-weight: 700; padding: 0; }
+    #favoriteStar:hover { color: #c5a74e; }
+    #favoriteStar:checked { color: #a8893f; }
+    #emptyText { color: #c2cddb; background: transparent; border: 0; padding: 0; font-size: 15px; font-weight: 500; line-height: 1.7; letter-spacing: 0.5px; }
+    #paginationBar { min-height: 22px; }
+    #paginationButton { min-height: 0; max-height: 22px; color: #e3eaf4; background: transparent; border: 1px solid #aab1ba; border-radius: 5px; padding: 0 9px; font-size: 11px; }
+    #paginationButton:hover { color: white; background: #2d65d6; border-color: #2d65d6; }
+    #paginationButton:disabled { color: #8a94a0; background: transparent; border-color: #4a545f; }
+    #pageLabel { color: #b9c6d6; min-width: 64px; font-size: 11px; qproperty-alignment: AlignCenter; }
+    #steamSyncStatus { background: #31404f; border: 1px solid #4a5f78; border-radius: 7px; }
+    #steamSyncLabel { color: #9fc3ff; font-size: 11px; font-weight: 700; }
+    #steamSyncProgress { min-height: 6px; max-height: 6px; border: 0; border-radius: 3px; background: #3a4a5c; }
+    #steamSyncProgress::chunk { border-radius: 3px; background: #7fb0f0; }
+    #footer { background: transparent; border-top: 1px solid #7e848b; border-bottom-left-radius: 14px; border-bottom-right-radius: 14px; }
+    #footer QLabel { color: #b9c6d6; padding-right: 12px; }
+    #conflictButton { color: #ff9aa3; background: transparent; border: 0; font-weight: 700; }
+    #conflictButton:hover { text-decoration: underline; }
+    #conflictButton:disabled { color: #8a94a0; }
+    #conflictButton[selected="true"] { border: 1px solid #ff8f99; border-radius: 6px; padding: 3px 6px; }
+    #closeButton { min-width: 30px; max-width: 30px; min-height: 30px; max-height: 30px; padding: 0; border: 0; color: #dbe4ef; background: transparent; font-size: 18px; font-weight: 800; }
+    #closeButton:hover { color: #ff7a85; background: transparent; }
+    #windowControlButton { padding: 0; border: 0; color: #dbe4ef; background: transparent; font-size: 16px; font-weight: 700; }
+    #windowControlButton:hover { color: #ffffff; background: #3f4854; border-radius: 5px; }
+    #dialogHeader { background: #39414c; border-bottom: 1px solid #56606c; border-top-left-radius: 14px; border-top-right-radius: 14px; }
+    #dialogTitle { color: #f2f6fc; font-size: 17px; font-weight: 800; }
+    #modDetailsContent { background: #363e48; border-bottom-left-radius: 14px; border-bottom-right-radius: 14px; }
+    #modDetailsTitle { color: #f2f6fc; font-size: 16px; font-weight: 800; }
+    #modDetailsKey { color: #b9c6d6; font-size: 11px; font-weight: 700; }
+    #modDetailsValue { color: #dbe4ef; font-size: 11px; }
+    #modDetailsDescription { color: #c8d3e0; background: #313945; border: 1px solid #4a545f; border-radius: 7px; padding: 9px; font-size: 11px; }
+    #contentBackButton { color: #b9c6d6; background: transparent; border: 0; padding: 0; }
+    #contentBackButton:hover { color: #9fc3ff; background: rgba(122, 170, 255, 40); border-radius: 5px; }
+    #mainDetailsHost, #mainConflictHost { background: transparent; }
+    #mainDetailsPreview { background: #3a424d; border: 1px solid #4a545f; border-radius: 9px; }
+    #mainDetailsTitle { color: #f2f6fc; font-size: 18px; font-weight: 800; }
+    #mainDetailsField { color: #c2cddb; font-size: 12px; padding: 2px 0; }
+    #mainDetailsDescription { color: #c8d3e0; background: rgba(54, 62, 72, 235); border: 1px solid #4a545f; border-radius: 8px; padding: 12px; font-size: 12px; line-height: 1.55; }
+    #steamDetailsLink { min-height: 28px; color: #ffffff; background: #285b9d; border: 1px solid #4b82c8; border-radius: 6px; padding: 0 10px; font-size: 11px; font-weight: 700; }
+    #steamDetailsLink:hover { background: #3470bc; color: white; }
+    #mainConflictGroup { background: rgba(250, 240, 242, 115); border: 1px solid #d99aa2; border-radius: 10px; }
+    #mainConflictGroupTitle { color: #b0404c; font-size: 12px; font-weight: 800; }
+    #mainConflictGroupReason { color: #4a3a42; background: rgba(251, 238, 240, 125); border: 1px solid #e0aab1; border-radius: 5px; padding: 5px 7px; font-size: 10px; }
+    #dialogSubtitle { color: #b9c6d6; font-size: 11px; }
+    #aboutContent { background: #363e48; border-bottom-left-radius: 14px; border-bottom-right-radius: 14px; }
+    #aboutBrand { color: #f2f6fc; font-size: 25px; font-weight: 800; letter-spacing: 2px; }
+    #aboutVersion { color: #9fc3ff; font-size: 12px; font-weight: 700; }
+    #aboutDesigner { color: #b9c6d6; font-size: 12px; font-weight: 500; padding: 2px 0; background: transparent; border: 0; }
+    #aboutDescription { color: #c2cddb; font-size: 12px; line-height: 1.55; }
+    #conflictBody { background: rgba(201, 205, 212, 96); border: 0; border-bottom-left-radius: 14px; border-bottom-right-radius: 14px; }
+    #conflictScroll { background: transparent; border: 0; }
+    #conflictViewport { background: rgba(201, 205, 212, 96); border: 0; border-bottom-left-radius: 14px; border-bottom-right-radius: 14px; }
+    #conflictHost { background: transparent; border: 0; }
+    #groupCardScroll, #groupCardsHost { background: rgba(201, 205, 212, 96); border: 0; border-radius: 7px; }
+    #conflictGroup { background: rgba(214, 218, 224, 108); border: 1px solid #9aa2ac; border-radius: 10px; }
+    #conflictGroupLabel { color: #b0404c; font-size: 11px; font-weight: 800; letter-spacing: 1px; }
+    #conflictCard { background: rgba(247, 230, 233, 115); border: 1px solid #d99aa2; border-radius: 10px; }
+    #conflictCard:hover { background: rgba(251, 238, 240, 135); border-color: #e0757f; }
+    #conflictCountBadge { color: #fff4f5; background: #a53a44; border: 1px solid #e2626c; border-radius: 12px; font-size: 11px; font-weight: 800; }
+    #conflictPreview { background: rgba(227, 230, 235, 110); border-radius: 7px; min-height: 104px; max-height: 104px; }
+    #conflictCaption { color: #b0404c; font-size: 11px; font-weight: 700; }
+    #conflictMeta { color: #5a6575; font-size: 9px; }
+    #conflictPeers { color: #3c4757; font-size: 11px; }
+    #conflictPeerButton { max-height: 28px; color: #9c3440; background: rgba(247, 230, 233, 115); border: 1px solid #d99aa2; border-radius: 6px; padding: 0 9px; font-size: 11px; font-weight: 700; }
+    #conflictPeerButton:hover { color: white; background: rgba(201, 74, 84, 235); border-color: #e26770; }
+    #promptSurface { background: #39414c; border: 1px solid #56606c; border-radius: 12px; }
+    #promptText { color: #dbe4ef; font-size: 13px; line-height: 1.5; }
+    #promptIconInfo, #promptIconWarning, #promptIconError { color: white; border-radius: 15px; font-size: 16px; font-weight: 800; }
+    #promptIconInfo { background: #2d65d6; border: 1px solid #5b8ced; }
+    #promptIconWarning { background: #a66d24; border: 1px solid #e5a34a; }
+    #promptIconError { background: #a93f4c; border: 1px solid #ed7681; }
+    #promptInput { min-height: 34px; background: #3f4854; color: #e3eaf4; border: 1px solid #56606c; border-radius: 7px; padding: 0 10px; }
+    #promptInput:focus { background: #47505d; border-color: #2d65d6; }
+    #appToast { background: #39414c; border: 1px solid #56606c; border-radius: 10px; }
+    #toastIcon { color: white; background: #2f9e63; border-radius: 11px; font-size: 13px; font-weight: 800; }
+    #toastText { color: #dbe4ef; font-size: 13px; line-height: 1.5; }
+    #promptPrimaryButton, #promptSecondaryButton { min-height: 32px; border-radius: 6px; padding: 0 15px; font-weight: 700; }
+    #promptPrimaryButton { background: #2d65d6; color: white; border: 1px solid #3d78e7; }
+    #promptPrimaryButton:hover { background: #3c78ee; border-color: #6297f3; }
+    #promptSecondaryButton { background: transparent; color: #e3eaf4; border: 1px solid #aab1ba; }
+    #promptSecondaryButton:hover { background: #2d65d6; border-color: #2d65d6; color: #ffffff; }
+    QToolTip { background: #2e3640; color: #e3eaf4; border: 1px solid #4a545f; border-radius: 5px; padding: 6px 8px; font-size: 11px; }
+    QMenu { background: #39414c; color: #e3eaf4; border: 1px solid #56606c; border-radius: 8px; padding: 5px; }
+    QMenu::item { min-height: 29px; border-radius: 5px; padding: 0 26px 0 11px; margin: 1px 0; }
+    QMenu::item:selected { background: #2d65d6; color: white; }
+    QMenu::item:disabled { color: #8a94a0; background: transparent; }
+    QMenu::separator { height: 1px; background: #4a545f; margin: 5px 8px; }
+    QMenu::right-arrow { width: 8px; height: 8px; }
+    QMessageBox, QInputDialog, QFileDialog { background: #39414c; color: #e3eaf4; }
+    QMessageBox QLabel, QInputDialog QLabel, QFileDialog QLabel { color: #c2cddb; }
+    QMessageBox QLabel#qt_msgbox_label { min-width: 280px; line-height: 1.45; }
+    QMessageBox QPushButton, QInputDialog QPushButton, QFileDialog QPushButton { min-height: 30px; background: #2d65d6; color: white; border: 1px solid #3d78e7; border-radius: 6px; padding: 0 14px; font-weight: 700; }
+    QMessageBox QPushButton:hover, QInputDialog QPushButton:hover, QFileDialog QPushButton:hover { background: #3c78ee; border-color: #6297f3; }
+    QMessageBox QPushButton:pressed, QInputDialog QPushButton:pressed, QFileDialog QPushButton:pressed { background: #2455b9; }
+    QMessageBox QPushButton[text="取消"], QMessageBox QPushButton[text="否"], QInputDialog QPushButton[text="取消"], QFileDialog QPushButton[text="取消"] { background: transparent; border-color: #aab1ba; color: #e3eaf4; }
+    QMessageBox QPushButton[text="取消"]:hover, QMessageBox QPushButton[text="否"]:hover, QInputDialog QPushButton[text="取消"]:hover, QFileDialog QPushButton[text="取消"]:hover { background: #2d65d6; border-color: #2d65d6; color: #ffffff; }
+    QInputDialog QLineEdit, QFileDialog QLineEdit { min-height: 30px; background: #3f4854; color: #e3eaf4; border: 1px solid #56606c; border-radius: 6px; padding: 0 9px; }
+    QInputDialog QLineEdit:focus, QFileDialog QLineEdit:focus { border-color: #2d65d6; background: #47505d; }
+    QFileDialog QTreeView, QFileDialog QListView, QFileDialog QSidebar { background: #363e48; color: #c8d3e0; border: 1px solid #4a545f; outline: 0; }
+    QFileDialog QTreeView::item, QFileDialog QListView::item, QFileDialog QSidebar::item { min-height: 27px; padding: 2px 7px; }
+    QFileDialog QTreeView::item:selected, QFileDialog QListView::item:selected, QFileDialog QSidebar::item:selected { background: #2d65d6; color: white; }
+    QFileDialog QComboBox { min-height: 28px; }
+    QStatusBar { background: #363e48; color: #a9b6c6; border-top: 1px solid #4a545f; }
 """}
+

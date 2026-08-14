@@ -65,6 +65,7 @@ def resizeEvent(self, event) -> None:
         )
     if hasattr(self, "_cards_loading_overlay") and self._cards_loading_overlay.isVisible():
         self._cards_loading_overlay.setGeometry(self.scroll.viewport().rect())
+        self._cards_loading_overlay.raise_()
     if hasattr(self, "cards_layout"):
         self._schedule_cards_refresh()
 
