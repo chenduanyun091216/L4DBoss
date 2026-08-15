@@ -52,12 +52,11 @@ def sync_single_mod_steam(self, mod_id: str) -> None:
     self.fetch_button.setEnabled(False)
     self.fetch_button.setText("")
     self.fetch_button.setIcon(self.style().standardIcon(QStyle.SP_BrowserStop))
-    self.fetch_button.setToolTip("取消 Steam 同步")
     self.fetch_button.setEnabled(True)
     self.steam_sync_progress.setRange(0, 1)
     self.steam_sync_progress.setValue(0)
     self._set_steam_sync_status(0, 1)
-    self.steam_sync_widget.show()
+    self._set_progress_visible(True)
     worker = Worker(fetch_steam_for_mods, {mod_id: pending}, progress_callback=None, cancel_event=self._steam_cancel_event)
     worker.kwargs["progress_callback"] = worker.signals.progress.emit
     worker.signals.progress.connect(self._set_steam_sync_status)
@@ -91,7 +90,7 @@ def on_steam_failed(self, message: str) -> None:
     self._reset_steam_sync_controls()
     if self._progress_owner == "steam":
         self._progress_owner = None
-        self.steam_sync_widget.hide()
+        self._set_progress_visible(False)
     QMessageBox.critical(self, "Steam 同步失败", message)
 
 
@@ -101,11 +100,10 @@ def cancel_steam_sync(self) -> None:
     self._steam_cancel_event.set()
     self.fetch_button.setText("")
     self.fetch_button.setIcon(self.style().standardIcon(QStyle.SP_BrowserStop))
-    self.fetch_button.setToolTip("正在取消 Steam 同步…")
     self.fetch_button.setEnabled(False)
     label = self.steam_sync_widget.findChild(QLabel, "steamSyncLabel")
     if label is not None:
-        label.setText("正在取消 Steam 同步…")
+        label.set_full_text("正在取消 Steam 同步…")
 
 
 def on_steam_cancelled(self) -> None:
@@ -117,7 +115,6 @@ def on_steam_cancelled(self) -> None:
 def _reset_steam_sync_controls(self) -> None:
     self.fetch_button.setText("同步 Steam")
     self.fetch_button.setIcon(self.style().standardIcon(QStyle.SP_ArrowDown))
-    self.fetch_button.setToolTip("同步 Steam：获取创意工坊 Mod 的名称、订阅数和标签")
     self.fetch_button.setEnabled(True)
 
 
@@ -129,7 +126,7 @@ def _set_steam_sync_status(self, completed: int, total: int) -> None:
     percent = round(completed * 100 / total) if total else 100
     label = self.steam_sync_widget.findChild(QLabel, "steamSyncLabel")
     if label is not None:
-        label.setText(f"正在同步 Steam 数据… {completed}/{total}（{percent}%）")
+        label.set_full_text(f"正在同步 Steam 数据… {completed}/{total}（{percent}%）")
 
 
 def _finish_with_message(self, text: str, owner: str) -> None:
@@ -145,8 +142,8 @@ def _finish_with_message(self, text: str, owner: str) -> None:
     self.steam_sync_progress.hide()
     label = self.steam_sync_widget.findChild(QLabel, "steamSyncLabel")
     if label is not None:
-        label.setText(text)
-    self.steam_sync_widget.show()
+        label.set_full_text(text)
+    self._set_progress_visible(True)
     QTimer.singleShot(3200, self._hide_status_message)
 
 
@@ -155,5 +152,5 @@ def _hide_status_message(self) -> None:
         # A new scan/sync reused the bar; leave it to that operation.
         return
     self.steam_sync_progress.show()
-    self.steam_sync_widget.hide()
+    self._set_progress_visible(False)
 

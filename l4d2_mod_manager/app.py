@@ -13,7 +13,7 @@ from PyQt5.QtGui import QIcon
 from PyQt5.QtWidgets import QApplication
 
 from .main_window import MainWindow
-from .theme import TITLE_ICON
+from .theme import TITLE_ICON, TOOLTIP_QSS
 
 
 def main() -> int:
@@ -21,6 +21,9 @@ def main() -> int:
     QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
     app = QApplication(sys.argv)
     app.setWindowIcon(QIcon(str(TITLE_ICON)))
+    # 一次性设置无父级顶层控件（QToolTip）的样式：此时窗口尚未创建，
+    # 几乎没有控件需要重抛光，成本可忽略；之后主题切换不再触碰 app 级样式。
+    app.setStyleSheet(TOOLTIP_QSS)
     window = MainWindow()
     window.show()
     return app.exec_()

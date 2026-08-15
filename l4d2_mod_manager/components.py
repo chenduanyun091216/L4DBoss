@@ -105,6 +105,127 @@ class TwoLineElidedLabel(QLabel):
         if end == 0:
             return "", text
         return text[:end].rstrip(), text[end:].lstrip()
+
+
+class SingleLineElidedLabel(QLabel):
+    """A single-line label used by the header status bar.
+
+    It grows with its text so the surrounding box stretches to fit the
+    full message (up to ``max_width``) instead of wrapping; it only
+    elides with an ellipsis when the window is too narrow.  The text is
+    kept vertically centered inside the box.
+    """
+
+    def __init__(self, text: str = "", parent=None, max_width: int = 360):
+        super().__init__(parent)
+        self._full_text = text
+        self._max_width = max(0, int(max_width))
+        self.setWordWrap(False)
+        self.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        self._update_text()
+
+    def set_full_text(self, text: str) -> None:
+        self._full_text = text
+        self._update_text()
+        # 全文变化后通知父布局重算尺寸（setText 只在可见文字变化时触发）。
+        self.updateGeometry()
+
+    def setText(self, text: str) -> None:
+        # 兼容直接调用 QLabel.setText 的调用方：同步维护内部全文，
+        # 否则布局触发的 resizeEvent 会用空的 _full_text 把文字清空。
+        self._full_text = text
+        self._update_text()
+
+    def clear(self) -> None:
+        # QLabel.clear() 内部不走 setText，需要在此同步清理全文，
+        # 避免旧文字在下次布局时被重新显示出来。
+        self._full_text = ""
+        super().clear()
+
+    def set_max_width(self, width: int) -> None:
+        self._max_width = max(0, int(width))
+        self._update_text()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._update_text()
+
+    def sizeHint(self) -> QSize:
+        metrics = self.fontMetrics()
+        text = self._full_text.replace("\n", " ").strip()
+        ideal = metrics.horizontalAdvance(text) + ui(4) if text else ui(4)
+        # max_width <= 0 表示不设上限，宽度完全由文字内容决定。
+        width = ideal if self._max_width <= 0 else min(ideal, self._max_width)
+        return QSize(width, super().sizeHint().height())
+
+    def minimumSizeHint(self) -> QSize:
+        return QSize(0, super().sizeHint().height())
+
+    def _update_text(self) -> None:
+        text = self._full_text.replace("\n", " ").strip()
+        available = self.width()
+        metrics = self.fontMetrics()
+        # 宽度未知（未布局/隐藏）时先显示完整文字，布局后再按真实宽度省略。
+        if available > 8 and metrics.horizontalAdvance(text) > available:
+            super().setText(metrics.elidedText(text, Qt.ElideRight, available))
+        else:
+            super().setText(text)
+
+
+class HintOverlay(QWidget):
+    """A top-level, always-on-top hint chip.
+
+    Lives in its own frameless tool window, so nothing inside the app can
+    cover it: it floats above the main window next to the hovered button,
+    takes no layout space, never steals focus or mouse input, and closes
+    together with the main window.
+    """
+
+    def __init__(self, main_window: QWidget):
+        super().__init__(
+            main_window,
+            Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
+            | Qt.WindowDoesNotAcceptFocus | Qt.WindowTransparentForInput,
+        )
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.setAttribute(Qt.WA_ShowWithoutActivating, True)
+        self.setObjectName("hoverOverlay")
+        outer = QHBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        # 可见的圆角框：作为子控件绘制背景/边框（顶层窗口不吃样式表背景），
+        # 内边距（左右 14 / 上下 9）即框内文字与边框的间距。
+        self.box = QFrame(self)
+        self.box.setObjectName("hoverHintBox")
+        box_layout = QHBoxLayout(self.box)
+        box_layout.setContentsMargins(ui(14), ui(9), ui(14), ui(9))
+        # 宽度完全由提示文字内容决定（max_width=0 表示不设上限，
+        # 文字多宽提示框就多宽，不做省略号截断）。
+        self.label = SingleLineElidedLabel("", max_width=0)
+        self.label.setObjectName("hoverHintChip")
+        box_layout.addWidget(self.label)
+        outer.addWidget(self.box)
+        self.hide()
+
+    def set_hint_text(self, text: str) -> None:
+        self.label.set_full_text(text)
+        # 宽度跟随文字内容：不依赖布局缓存的 totalSizeHint（隐藏状态下布局
+        # 不会随文字同步失效），直接按“文字 + 框内边距 + 左右 1px 边框”
+        # 计算整个提示框的尺寸。
+        self.label.adjustSize()
+        margins = self.box.layout().contentsMargins()
+        width = self.label.width() + margins.left() + margins.right() + 2
+        height = self.label.height() + margins.top() + margins.bottom() + 2
+        self.resize(width, height)
+
+    def show_near(self, anchor_global: QPoint, anchor_height: int) -> None:
+        x = anchor_global.x() - self.width() - ui(8)
+        x = max(4, x)
+        y = anchor_global.y() + (anchor_height - self.height()) // 2
+        self.move(x, y)
+        self.show()
+        self.raise_()
+
+
 def mod_type_tags(mod: Mod) -> list[tuple[str, str]]:
     """Return at most three useful type tags, preferring concrete targets."""
     categories = set(mod.categories)
@@ -571,20 +692,50 @@ class DragHeader(QFrame):
         super().__init__(parent)
         self.target = target
         self._drag_offset = None
+        self._native_dragging = False
 
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.LeftButton:
             self._drag_offset = event.globalPos() - self.target.frameGeometry().topLeft()
+            self._native_dragging = False
             event.accept()
 
     def mouseMoveEvent(self, event) -> None:
         if self._drag_offset is not None and event.buttons() & Qt.LeftButton:
-            self.target.move(event.globalPos() - self._drag_offset)
+            if not self._begin_native_move():
+                # Fallback for Qt builds without startSystemMove(): move the
+                # window manually, exactly like the original implementation.
+                self.target.move(event.globalPos() - self._drag_offset)
             event.accept()
 
     def mouseReleaseEvent(self, event) -> None:
         self._drag_offset = None
+        self._native_dragging = False
         event.accept()
+
+    def _begin_native_move(self) -> bool:
+        """Start the OS move loop when Qt supports it.
+
+        The native loop moves the window surface without repainting its
+        contents on every mouse event, which is what made manual dragging
+        stutter on windows with a large custom-painted background.  The
+        mouse release is consumed by the loop, so stale drag state is reset
+        on the next press.
+        """
+        if self._native_dragging:
+            return True
+        handle = self.target.windowHandle()
+        start = getattr(handle, "startSystemMove", None) if handle is not None else None
+        if start is None:
+            return False
+        try:
+            if start():
+                self._native_dragging = True
+                self._drag_offset = None
+                return True
+        except Exception:
+            pass
+        return False
 
     def mouseDoubleClickEvent(self, event) -> None:
         if event.button() == Qt.LeftButton:
@@ -602,12 +753,29 @@ class BackgroundSurface(QWidget):
     def __init__(self, image_path: Path, parent=None):
         super().__init__(parent)
         self._background = QPixmap(str(image_path)) if image_path.exists() else QPixmap()
+        # Cache the scaled wallpaper per widget size: smooth-scaling the image
+        # is the most expensive part of each repaint, and during window
+        # dragging the size does not change, so a cache hit turns every drag
+        # frame into a plain blit instead of a full high-quality scale.
+        self._scaled_cache: tuple[QSize, QPixmap] | None = None
+
+    def _scaled_background(self) -> QPixmap:
+        """Return the wallpaper scaled to the current size, cached per size."""
+        size = self.size()
+        if size.width() <= 0 or size.height() <= 0:
+            return self._background
+        if self._scaled_cache is None or self._scaled_cache[0] != size:
+            self._scaled_cache = (
+                size,
+                self._background.scaled(size, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation),
+            )
+        return self._scaled_cache[1]
 
     def paintEvent(self, _event) -> None:
         painter = QPainter(self)
         painter.fillRect(self.rect(), QColor(theme_color("surface")))
         if not self._background.isNull():
-            scaled = self._background.scaled(self.size(), Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
+            scaled = self._scaled_background()
             x = (self.width() - scaled.width()) // 2
             y = (self.height() - scaled.height()) // 2
             painter.setOpacity(theme_bg_opacity())

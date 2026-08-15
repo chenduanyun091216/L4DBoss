@@ -81,6 +81,7 @@ class MainWindow(QMainWindow):
         self.collection_sync_pool.setMaxThreadCount(1)
         self.steam_sync_in_progress = False
         self._progress_owner: str | None = None
+        self._progress_visible = False
         self._steam_cancel_event = Event()
         self._card_widgets: dict[str, ModCard] = {}
         self._card_cache: dict[str, ModCard] = {}
@@ -158,18 +159,51 @@ class MainWindow(QMainWindow):
         hints = {
             getattr(self, "choose_button", None): "选择游戏：定位 left4dead2.exe 并扫描 addons 文件夹",
             getattr(self, "refresh_button", None): "扫描 Mod：重新扫描本地 addons 文件夹",
-            getattr(self, "fetch_button", None): "同步 Steam：获取创意工坊 Mod 信息",
+            getattr(self, "fetch_button", None): "同步 Steam：获取创意工坊 Mod 的名称、订阅数和标签",
             getattr(self, "theme_button", None): "切换主题：点击选择界面配色",
             getattr(self, "minimize_button", None): "最小化窗口",
             getattr(self, "maximize_button", None): "最大化 / 还原窗口",
             getattr(self, "close_button", None): "关闭程序",
+            getattr(self, "toggle_all_button", None): "全部启动：启动当前所有 Mod",
+            getattr(self, "save_button", None): "保存：将当前激活 Mod 存入组合",
+            getattr(self, "save_as_button", None): "另存为：将当前激活 Mod 另存为",
+            getattr(self, "launch_button", None): "启动游戏：启动游戏 L4D",
         }
-        if source in hints and hasattr(self, "header_hint"):
+        if source in hints:
+            is_footer = source in getattr(self, "_footer_action_buttons", ())
             if event.type() == QEvent.Enter:
-                self._show_header_hint(hints[source])
+                if source is getattr(self, "save_button", None):
+                    # 保存按钮的说明需要动态带上当前选中的组合名称。
+                    text = self._save_hint_text()
+                else:
+                    text = hints[source]
+                if is_footer:
+                    self._show_footer_hint(text)
+                else:
+                    self._show_header_hint(text)
             elif event.type() == QEvent.Leave:
-                self._clear_header_hint()
+                if is_footer:
+                    self._clear_footer_hint()
+                else:
+                    self._clear_header_hint()
+            elif event.type() == QEvent.MouseButtonPress:
+                # 点击按钮即收起悬停说明，避免与随后出现的进度条叠在一起。
+                if is_footer:
+                    self._clear_footer_hint()
+                else:
+                    self._clear_header_hint()
         return super().eventFilter(source, event)
+
+    def _save_hint_text(self) -> str:
+        """保存按钮的悬停说明：拼接当前选中的组合名称。"""
+        names = sorted(self._selected_collection_names)
+        if not names:
+            target = "未选择组合"
+        elif len(names) == 1:
+            target = names[0]
+        else:
+            target = f"已选 {len(names)} 个组合"
+        return f"保存：将当前激活 Mod 存入组合「{target}」"
 
     def refresh_stats(self) -> None:
         conflicts = sum(1 for mod in self.mods.values() if mod.conflict_with)
@@ -197,6 +231,10 @@ from .main_window_build import (
     restore_default_window,
     _show_header_hint,
     _clear_header_hint,
+    _show_footer_hint,
+    _clear_footer_hint,
+    _show_hover_hint,
+    _clear_hover_hint,
     _update_theme_button,
     _theme_icon,
     _open_theme_menu,
@@ -207,6 +245,8 @@ from .main_window_build import (
     _make_mod_count_button,
     _build_footer,
     _apply_style,
+    _set_progress_visible,
+    _show_title_menu,
 )
 
 MainWindow._build_ui = _build_ui
@@ -217,6 +257,10 @@ MainWindow.toggle_maximized = toggle_maximized
 MainWindow.restore_default_window = restore_default_window
 MainWindow._show_header_hint = _show_header_hint
 MainWindow._clear_header_hint = _clear_header_hint
+MainWindow._show_footer_hint = _show_footer_hint
+MainWindow._clear_footer_hint = _clear_footer_hint
+MainWindow._show_hover_hint = _show_hover_hint
+MainWindow._clear_hover_hint = _clear_hover_hint
 MainWindow._update_theme_button = _update_theme_button
 MainWindow._theme_icon = _theme_icon
 MainWindow._open_theme_menu = _open_theme_menu
@@ -227,6 +271,8 @@ MainWindow._build_footer_legacy = _build_footer_legacy
 MainWindow._make_mod_count_button = _make_mod_count_button
 MainWindow._build_footer = _build_footer
 MainWindow._apply_style = _apply_style
+MainWindow._set_progress_visible = _set_progress_visible
+MainWindow._show_title_menu = _show_title_menu
 
 from .main_window_cards import (
     _rebuild_conflict_index,
@@ -246,6 +292,7 @@ from .main_window_cards import (
     _change_card_size,
     _release_card_size_alignment,
     _columns_for_card_size,
+    _effective_card_size,
     card_columns,
     card_width,
     _card_viewport_width,
@@ -282,6 +329,7 @@ MainWindow.on_search_changed = on_search_changed
 MainWindow._change_card_size = _change_card_size
 MainWindow._release_card_size_alignment = _release_card_size_alignment
 MainWindow._columns_for_card_size = _columns_for_card_size
+MainWindow._effective_card_size = _effective_card_size
 MainWindow.card_columns = card_columns
 MainWindow.card_width = card_width
 MainWindow._card_viewport_width = _card_viewport_width
@@ -315,6 +363,7 @@ from .main_window_mods import (
     toggle_all_mods,
     toggle_mod,
     toggle_favorite,
+    open_mods_directory,
 )
 
 MainWindow.choose_directory = choose_directory
@@ -331,6 +380,7 @@ MainWindow.set_all_mods_active = set_all_mods_active
 MainWindow.toggle_all_mods = toggle_all_mods
 MainWindow.toggle_mod = toggle_mod
 MainWindow.toggle_favorite = toggle_favorite
+MainWindow.open_mods_directory = open_mods_directory
 
 from .main_window_collections import (
     collection_names_for,
@@ -443,6 +493,8 @@ from .main_window_events import (
     set_busy,
     closeEvent,
     resizeEvent,
+    moveEvent,
+    changeEvent,
     showEvent,
     _apply_native_window_corner,
 )
@@ -451,6 +503,8 @@ MainWindow.on_worker_failed = on_worker_failed
 MainWindow.set_busy = set_busy
 MainWindow.closeEvent = closeEvent
 MainWindow.resizeEvent = resizeEvent
+MainWindow.moveEvent = moveEvent
+MainWindow.changeEvent = changeEvent
 MainWindow.showEvent = showEvent
 MainWindow._apply_native_window_corner = _apply_native_window_corner
 

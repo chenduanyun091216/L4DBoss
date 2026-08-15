@@ -39,7 +39,7 @@ def on_worker_failed(self, message: str) -> None:
     self.set_busy(False)
     if getattr(self, "_progress_owner", None) == "scan":
         self._progress_owner = None
-        self.steam_sync_widget.hide()
+        self._set_progress_visible(False)
     QMessageBox.critical(self, "操作失败", message)
 
 
@@ -68,6 +68,32 @@ def resizeEvent(self, event) -> None:
         self._cards_loading_overlay.raise_()
     if hasattr(self, "cards_layout"):
         self._schedule_cards_refresh()
+    # 窗口尺寸变化时，让置顶提示跟随锚点按钮重新定位。
+    if (
+        getattr(self, "hover_overlay", None) is not None
+        and self.hover_overlay.isVisible()
+        and getattr(self, "_hover_anchor", None) is not None
+    ):
+        self._show_hover_hint(self._hover_text, self._hover_anchor)
+
+
+def moveEvent(self, event) -> None:
+    super(type(self), self).moveEvent(event)
+    # 拖动窗口时，让置顶提示跟随锚点按钮一起移动。
+    if (
+        getattr(self, "hover_overlay", None) is not None
+        and self.hover_overlay.isVisible()
+        and getattr(self, "_hover_anchor", None) is not None
+    ):
+        self._show_hover_hint(self._hover_text, self._hover_anchor)
+
+
+def changeEvent(self, event) -> None:
+    super(type(self), self).changeEvent(event)
+    if event.type() == QEvent.WindowStateChange and self.isMinimized():
+        overlay = getattr(self, "hover_overlay", None)
+        if overlay is not None:
+            overlay.hide()
 
 
 def showEvent(self, event) -> None:

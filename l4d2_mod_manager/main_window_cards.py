@@ -304,7 +304,6 @@ def _populate_cards_batch(
 def _update_pagination(self, total: int, total_pages: int) -> None:
     visible = total_pages > 1
     self.pagination_bar.setVisible(True)
-    self.pagination_spacer.setVisible(True)
     self.previous_page_button.setVisible(visible)
     self.page_label.setVisible(visible)
     self.next_page_button.setVisible(visible)
@@ -330,7 +329,9 @@ def _change_card_size(self, delta: int) -> None:
     adjustment_token = self._card_size_adjustment_token
     self._suppress_content_alignment = True
     old_columns = self.card_columns() if hasattr(self, "cards_layout") else 1
-    candidate = max(ui(160), min(ui(300), self._card_size + delta))
+    # 以当前有效尺寸（全屏时含 +10 提升）为基准步进，避免全屏下
+    # “+/-”按钮因提升量而产生与普通模式不一致的行为。
+    candidate = max(ui(160), min(ui(300), self._effective_card_size() + delta))
     # Cards fill their row, so a small target-size change is not visible
     # until it changes the column count. Skip invisible intermediate
     # values and land on the next column threshold in one click.
@@ -340,10 +341,12 @@ def _change_card_size(self, delta: int) -> None:
     elif delta < 0:
         while candidate > ui(160) and self._columns_for_card_size(candidate) == old_columns:
             candidate = max(ui(160), candidate - ui(10))
-    self._card_size = candidate
+    # 回存基础尺寸：减去全屏提升量，保证恢复普通模式后尺寸不被永久改变。
+    boost = ui(10) if self.isMaximized() else 0
+    self._card_size = max(ui(160), min(ui(300), candidate - boost))
     self.card_size_decrease.setEnabled(self._card_size > ui(160))
     self.card_size_increase.setEnabled(self._card_size < ui(300))
-    size_text = f"当前卡片宽度约 {self._card_size}px；卡片保持等比例缩放"
+    size_text = f"当前卡片宽度约 {self._effective_card_size()}px；卡片保持等比例缩放"
     self.card_size_decrease.setToolTip(f"缩小卡片（{size_text}）")
     self.card_size_increase.setToolTip(f"放大卡片（{size_text}）")
     if hasattr(self, "cards_layout") and self._content_mode == "mods" and self._cards_ready_for_reflow:
@@ -366,13 +369,28 @@ def _columns_for_card_size(self, preferred: int) -> int:
     return max(1, (width + spacing) // (preferred + spacing))
 
 
+def _effective_card_size(self) -> int:
+    """Preferred card width for the current window state.
+
+    While the window is maximized the cards render one level (10px) larger
+    than the stored base size, so a fullscreen window shows fewer, wider
+    cards instead of simply packing more of the same size per row.  The
+    base _card_size is untouched, so restoring the window returns to
+    exactly the previous size.
+    """
+    preferred = getattr(self, "_card_size", ui(214))
+    if self.isMaximized():
+        preferred = min(ui(300), preferred + ui(10))
+    return preferred
+
+
 def card_columns(self) -> int:
     width = self._card_viewport_width()
     spacing = self.cards_layout.horizontalSpacing() if hasattr(self, "cards_layout") else ui(11)
     # Cards expand to use any extra room, so the final column never leaves a
     # large dead area. The default window shows about five cards per row and a
     # maximized window about eight, governed by _card_size below.
-    preferred = getattr(self, "_card_size", ui(214))
+    preferred = self._effective_card_size()
     return max(1, (width + spacing) // (preferred + spacing))
 
 
@@ -434,6 +452,11 @@ def _schedule_cards_refresh(self, *_args) -> None:
 def _refresh_cards_after_layout(self) -> None:
     self._card_refresh_pending = False
     self._reflow_cards()
+    # 每次 resize 触发的卡片重排之后都要（合并地）重新对齐工具栏/底部
+    # 按钮到卡片网格右缘。窗口最大化/还原的过渡期会连续产生 resize 事件，
+    # 最后一次 16ms 重排可能晚于窗口状态对齐定时器（0/60/180ms）才执行；
+    # 没有这一步，对齐会停在旧位置上，且之后没有事件再触发纠正。
+    self._schedule_content_alignment()
 
 
 def _reflow_cards(self) -> None:
@@ -493,7 +516,6 @@ def _sync_content_right_edges(self, force: bool = False) -> None:
         grid_right = self.scroll.viewport().mapToGlobal(QPoint(grid_width, 0)).x()
         inset = max(0, self.content_bar.width() - (grid_right - bar_left))
     self.content_bar.layout().setContentsMargins(0, 0, inset, 0)
-    self.pagination_bar.layout().setContentsMargins(0, 0, inset, 0)
     # Match both toolbar controls to one card column.  As the combo box
     # remains the final item in this right-aligned layout, its right edge
     # shares the right edge of the last card as well.
@@ -529,20 +551,32 @@ def _sync_content_right_edges(self, force: bool = False) -> None:
     if hasattr(self, "_footer_action_buttons") and hasattr(self, "_header_action_buttons"):
         grid_gap = self.cards_layout.horizontalSpacing()
         self.action_host.layout().setSpacing(grid_gap)
-        action_buttons = self._header_action_buttons + self._footer_action_buttons
-        action_width = max(button.minimumSizeHint().width() for button in action_buttons)
-        action_height = max(ui(1), max(button.minimumSizeHint().height() for button in action_buttons) - ui(2))
-        for button in action_buttons:
-            button.setFixedSize(action_width, action_height)
-        # 底部提示进度条（扫描/同步/恢复共用）与按钮保持同一高度。
-        if hasattr(self, "steam_sync_widget"):
-            self.steam_sync_widget.setFixedHeight(max(action_height, ui(1)))
+        # 头部按钮取各自自然宽度（为头部进度条留出空间，不再强制等宽）；
+        # 底部四个按钮统一使用“启动游戏”按钮的宽度，保持右下角按钮组等宽。
+        header_buttons = self._header_action_buttons
+        footer_buttons = self._footer_action_buttons
+        action_height = max(ui(1), max(
+            max(button.minimumSizeHint().height() for button in header_buttons),
+            max(button.minimumSizeHint().height() for button in footer_buttons),
+        ) - ui(2))
+        for button in header_buttons:
+            button.setFixedSize(button.minimumSizeHint().width(), action_height)
+        launch_width = self.launch_button.minimumSizeHint().width()
+        for button in footer_buttons:
+            button.setFixedSize(launch_width, action_height)
     if hasattr(self, "action_host"):
         # The footer starts after the fixed sidebar.  Mirror the content
         # area's outer gutter and scrollbar inset for a shared right edge.
         # The footer itself extends to the app edge, so include that outer
         # gutter as well when aligning its final action to the viewport.
         self.action_host.layout().setContentsMargins(ui(16), 0, ui(8) + inset, 0)
+    # 按钮位置调整后，让置顶提示跟随锚点按钮重新定位。
+    if (
+        getattr(self, "hover_overlay", None) is not None
+        and self.hover_overlay.isVisible()
+        and getattr(self, "_hover_anchor", None) is not None
+    ):
+        self._show_hover_hint(self._hover_text, self._hover_anchor)
 
 
 def _schedule_window_state_alignment(self) -> None:

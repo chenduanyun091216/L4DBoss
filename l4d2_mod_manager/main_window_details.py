@@ -141,8 +141,6 @@ def _show_content_widget(self, title: str, subtitle: str, widget: QWidget) -> No
     self.search_input.hide()
     self.collection_combo.hide()
     self.pagination_bar.hide()
-    if hasattr(self, "pagination_spacer"):
-        self.pagination_spacer.hide()
     self.cards_layout.setAlignment(Qt.AlignTop | Qt.AlignLeft)
     self.cards_layout.addWidget(widget, 0, 0)
 

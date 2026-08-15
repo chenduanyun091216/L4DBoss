@@ -36,6 +36,8 @@ APP_ROOT = Path(__file__).resolve().parent.parent
 BACKGROUND_IMAGE = APP_ROOT / "files" / "bg.png"
 TITLE_IMAGE = APP_ROOT / "files" / "title.png"
 TITLE_ICON = APP_ROOT / "files" / "title.ico"
+# 使用手册（GitHub README）地址，标题右键菜单“使用手册”使用。
+MANUAL_URL = "https://github.com/chenduanyun091216/L4DBoss/blob/main/README.md"
 # Runtime data is kept outside the bundled application so it remains writable
 # and survives Nuitka onefile extraction.
 USER_DATA_ROOT = Path(
@@ -51,6 +53,14 @@ def ui(value: int) -> int:
 
 # Active theme (global so programmatically painted widgets can adapt).
 ACTIVE_THEME = "dark"
+
+# QToolTip 是无父级的顶层控件，不继承窗口级样式表。该样式在应用启动时
+# 一次性设置到 QApplication 上（固定深色，任何主题下都清晰可读），之后
+# 切换主题只更换窗口级样式表，避免 QApplication.setStyleSheet 的全量重抛光。
+TOOLTIP_QSS = (
+    "QToolTip { background: #202c3d; color: #e9f1ff; border: 1px solid #496282;"
+    " border-radius: 5px; padding: 6px 8px; font-size: 11px; }"
+)
 
 # Programmatically painted colors per theme. Keys are stable identifiers used
 # by the custom paintEvent/draw code; each theme maps them to concrete colors.
@@ -147,6 +157,9 @@ THEMES = {
     #brandCredit { color: #8291a8; font-size: 11px; font-weight: 700; }
     #brandSub, #contentSubtitle { color: #8090a8; font-size: 10px; font-weight: 700; letter-spacing: 1px; }
     #headerHint { color: #a9bbd5; font-size: 11px; font-weight: 600; padding-right: 8px; }
+    #hoverOverlay { background: transparent; }
+    #hoverHintBox { background: #23344c; border: 1px solid #355577; border-radius: 8px; }
+    #hoverHintChip { color: #bcd7ff; font-size: 11px; font-weight: 700; }
     #headerButton, #headerButtonSecondary, #primaryButton, #secondaryButton, #launchButton, #toggleAllButton { background: #273347; color: #d9e4f4; border: 1px solid #38465c; border-radius: 7px; padding: 5px 10px; font-weight: 700; }
     #headerButton:hover, #headerButtonSecondary:hover, #primaryButton:hover, #secondaryButton:hover, #launchButton:hover, #toggleAllButton:hover { background: #3a5378; color: white; border: 2px solid #6aa0ff; }
     #headerIconButton { background: #202c40; border: 0; border-radius: 7px; padding: 0; }
@@ -208,12 +221,12 @@ THEMES = {
     #modCardActive:hover { background: #174538; border: 2px solid #55efad; }
     #modCardConflict { border: 2px solid #ff4757; background: #481923; }
     #modCardConflict:hover { background: #5a1d29; border: 2px solid #ff7885; }
-    #modCard[favorite="true"], #modCardActive[favorite="true"], #modCardConflict[favorite="true"] {
-        border: 2px solid #f5b301;
-    }
-    #modCard[favorite="true"]:hover, #modCardActive[favorite="true"]:hover, #modCardConflict[favorite="true"]:hover {
-        border: 2px solid #ffc83d;
-    }
+    #modCard[favorite="true"] { border: 2px solid #f5b301; background: #27291b; }
+    #modCardActive[favorite="true"] { border: 2px solid #f5b301; background: #203b2d; }
+    #modCardConflict[favorite="true"] { border: 2px solid #f5b301; background: #4b2322; }
+    #modCard[favorite="true"]:hover { border: 2px solid #ffc83d; background: #2e3122; }
+    #modCardActive[favorite="true"]:hover { border: 2px solid #ffc83d; background: #274639; }
+    #modCardConflict[favorite="true"]:hover { border: 2px solid #ffc83d; background: #5d2826; }
     #preview { background: #111821; border-radius: 7px; }
     #cardTitle { color: #f2f6fc; font-size: 13px; font-weight: 700; line-height: 1.32; }
     #cardMeta { color: #91a0b4; font-size: 10px; }
@@ -231,10 +244,10 @@ THEMES = {
     #favoriteStar:checked { color: #f5b301; }
     #emptyText { color: #9db2d0; background: transparent; border: 0; padding: 0; font-size: 15px; font-weight: 500; line-height: 1.7; letter-spacing: 0.5px; }
     #paginationBar { min-height: 22px; }
-    #paginationButton { min-height: 0; max-height: 22px; color: #cbd7e8; background: #253247; border: 1px solid #34445c; border-radius: 5px; padding: 0 9px; font-size: 11px; }
+    #paginationButton { min-height: 0; max-height: 22px; color: #cbd7e8; background: #253247; border: 1px solid #34445c; border-radius: 5px; padding: 0 6px; font-size: 11px; }
     #paginationButton:hover { color: white; background: #2d65d6; border-color: #2d65d6; }
     #paginationButton:disabled { color: #687384; background: #1b222d; border-color: #2d3747; }
-    #pageLabel { color: #91a0b4; min-width: 64px; font-size: 11px; qproperty-alignment: AlignCenter; }
+    #pageLabel { color: #91a0b4; min-width: 40px; font-size: 11px; qproperty-alignment: AlignCenter; }
     #steamSyncStatus { background: #1b2a3d; border: 1px solid #355577; border-radius: 7px; }
     #steamSyncLabel { color: #bcd7ff; font-size: 11px; font-weight: 700; }
     #steamSyncProgress { min-height: 6px; max-height: 6px; border: 0; border-radius: 3px; background: #263a54; }
@@ -340,6 +353,9 @@ THEMES = {
     #brandCredit { color: #6b7a93; font-size: 11px; font-weight: 700; }
     #brandSub, #contentSubtitle { color: #5d6c85; font-size: 10px; font-weight: 700; letter-spacing: 1px; }
     #headerHint { color: #4c5d78; font-size: 11px; font-weight: 600; padding-right: 8px; }
+    #hoverOverlay { background: transparent; }
+    #hoverHintBox { background: #f5f9ff; border: 1px solid #9db6d6; border-radius: 8px; }
+    #hoverHintChip { color: #2b5bb8; font-size: 11px; font-weight: 700; }
     #headerButton, #headerButtonSecondary, #primaryButton, #secondaryButton, #launchButton, #toggleAllButton { background: #edf1f9; color: #24334c; border: 1px solid #aab6c8; border-radius: 7px; padding: 5px 10px; font-weight: 700; }
     #headerButton:hover, #headerButtonSecondary:hover, #primaryButton:hover, #secondaryButton:hover, #launchButton:hover, #toggleAllButton:hover { background: #ffffff; color: #0b2a52; border: 2px solid #4d83eb; }
     #headerIconButton { background: #e4e9f2; border: 0; border-radius: 7px; padding: 0; }
@@ -395,16 +411,16 @@ THEMES = {
     #collectionComboMenu QScrollBar::handle:vertical:hover { background: #a3b4d1; }
     #modCard, #modCardActive, #modCardConflict { background: rgba(244, 247, 251, 250); border: 1px solid #9aa7ba; border-radius: 10px; }
     #modCard:hover { background: #ffffff; border: 2px solid #4d83eb; }
-    #modCardActive { border: 2px solid #1c4fd0; background: rgba(201, 223, 252, 255); }
-    #modCardActive:hover { background: #b9d4fb; border: 2px solid #143da8; }
-    #modCardConflict { border: 2px solid #d8363f; background: rgba(250, 211, 216, 255); }
-    #modCardConflict:hover { background: #f8c6cc; border: 2px solid #c52832; }
-    #modCard[favorite="true"], #modCardActive[favorite="true"], #modCardConflict[favorite="true"] {
-        border: 2px solid #c98a00;
-    }
-    #modCard[favorite="true"]:hover, #modCardActive[favorite="true"]:hover, #modCardConflict[favorite="true"]:hover {
-        border: 2px solid #f5b301;
-    }
+    #modCardActive { border: 2px solid #1c4fd0; background: rgba(170, 200, 247, 255); }
+    #modCardActive:hover { background: rgba(159, 192, 242, 255); border: 2px solid #143da8; }
+    #modCardConflict { border: 2px solid #d8363f; background: rgba(242, 188, 196, 255); }
+    #modCardConflict:hover { background: rgba(235, 176, 186, 255); border: 2px solid #c52832; }
+    #modCard[favorite="true"] { border: 2px solid #c98a00; background: #fdf5d7; }
+    #modCardActive[favorite="true"] { border: 2px solid #c98a00; background: #e2e0ba; }
+    #modCardConflict[favorite="true"] { border: 2px solid #c98a00; background: #f4dcbd; }
+    #modCard[favorite="true"]:hover { border: 2px solid #f5b301; background: #fdf1c2; }
+    #modCardActive[favorite="true"]:hover { border: 2px solid #f5b301; background: #dad8ad; }
+    #modCardConflict[favorite="true"]:hover { border: 2px solid #f5b301; background: #efcda4; }
     #preview { background: #eef2f8; border-radius: 7px; }
     #cardTitle { color: #1d2b43; font-size: 13px; font-weight: 700; line-height: 1.32; }
     #cardMeta { color: #66748c; font-size: 10px; }
@@ -422,10 +438,10 @@ THEMES = {
     #favoriteStar:checked { color: #c98a00; }
     #emptyText { color: #5f718e; background: transparent; border: 0; padding: 0; font-size: 15px; font-weight: 500; line-height: 1.7; letter-spacing: 0.5px; }
     #paginationBar { min-height: 22px; }
-    #paginationButton { min-height: 0; max-height: 22px; color: #3c4e6b; background: #e9eef7; border: 1px solid #aab6c8; border-radius: 5px; padding: 0 9px; font-size: 11px; }
+    #paginationButton { min-height: 0; max-height: 22px; color: #3c4e6b; background: #e9eef7; border: 1px solid #aab6c8; border-radius: 5px; padding: 0 6px; font-size: 11px; }
     #paginationButton:hover { color: white; background: #2d65d6; border-color: #2d65d6; }
     #paginationButton:disabled { color: #98a5b8; background: #eef1f6; border-color: #d8dee8; }
-    #pageLabel { color: #66748c; min-width: 64px; font-size: 11px; qproperty-alignment: AlignCenter; }
+    #pageLabel { color: #66748c; min-width: 40px; font-size: 11px; qproperty-alignment: AlignCenter; }
     #steamSyncStatus { background: #e8f0fc; border: 1px solid #9db6d6; border-radius: 7px; }
     #steamSyncLabel { color: #2b5bb8; font-size: 11px; font-weight: 700; }
     #steamSyncProgress { min-height: 6px; max-height: 6px; border: 0; border-radius: 3px; background: #d6e2f5; }
@@ -531,6 +547,9 @@ THEMES = {
     #brandCredit { color: #b9c6d6; font-size: 11px; font-weight: 700; }
     #brandSub, #contentSubtitle { color: #a9b6c6; font-size: 10px; font-weight: 700; letter-spacing: 1px; }
     #headerHint { color: #c2cddb; font-size: 11px; font-weight: 600; padding-right: 8px; }
+    #hoverOverlay { background: transparent; }
+    #hoverHintBox { background: #3d4753; border: 1px solid #aab1ba; border-radius: 8px; }
+    #hoverHintChip { color: #dbe4ef; font-size: 11px; font-weight: 700; }
     #headerButton, #headerButtonSecondary { background: transparent; color: #e3eaf4; border: 1px solid #aab1ba; border-radius: 7px; padding: 5px 10px; font-weight: 700; }
     #headerButton:hover, #headerButtonSecondary:hover { background: #2d65d6; color: #ffffff; border: 2px solid #2d65d6; }
     /* 底部四个操作按钮（全部启动/保存/另存为/启动游戏）：透明底 + 国网绿描边，悬浮时背景变为国网绿 */
@@ -588,16 +607,16 @@ THEMES = {
     #collectionComboMenu QScrollBar::handle:vertical:hover { background: #7a838f; }
     #modCard, #modCardActive, #modCardConflict { background: rgba(210, 214, 220, 112); border: 1px solid #8a919b; border-radius: 10px; }
     #modCard:hover { background: rgba(223, 226, 231, 140); border: 2px solid #7089c0; }
-    #modCardActive { border: 2px solid #4d6aa8; background: rgba(206, 224, 250, 128); }
-    #modCardActive:hover { background: rgba(195, 217, 249, 146); border: 2px solid #40598f; }
-    #modCardConflict { border: 2px solid #a4635f; background: rgba(252, 227, 231, 128); }
-    #modCardConflict:hover { background: rgba(246, 214, 218, 146); border: 2px solid #8d5753; }
-    #modCard[favorite="true"], #modCardActive[favorite="true"], #modCardConflict[favorite="true"] {
-        border: 2px solid #a8893f;
-    }
-    #modCard[favorite="true"]:hover, #modCardActive[favorite="true"]:hover, #modCardConflict[favorite="true"]:hover {
-        border: 2px solid #c5a74e;
-    }
+    #modCardActive { border: 2px solid #3f6fce; background: rgba(150, 182, 232, 242); }
+    #modCardActive:hover { background: rgba(134, 170, 228, 248); border: 2px solid #2f5cb0; }
+    #modCardConflict { border: 2px solid #cf4a58; background: rgba(244, 180, 192, 242); }
+    #modCardConflict:hover { background: rgba(238, 164, 178, 248); border: 2px solid #b03a47; }
+    #modCard[favorite="true"] { border: 2px solid #a8893f; background: rgba(216, 210, 172, 112); }
+    #modCardActive[favorite="true"] { border: 2px solid #a8893f; background: rgba(178, 184, 148, 242); }
+    #modCardConflict[favorite="true"] { border: 2px solid #a8893f; background: rgba(240, 194, 152, 242); }
+    #modCard[favorite="true"]:hover { border: 2px solid #c5a74e; background: rgba(224, 218, 180, 140); }
+    #modCardActive[favorite="true"]:hover { border: 2px solid #c5a74e; background: rgba(166, 178, 136, 248); }
+    #modCardConflict[favorite="true"]:hover { border: 2px solid #c5a74e; background: rgba(232, 180, 138, 248); }
     #preview { background: #bcc1c9; border-radius: 7px; }
     #cardTitle { color: #3c4652; font-size: 13px; font-weight: 700; line-height: 1.32; }
     #cardMeta { color: #5f6a76; font-size: 10px; }
@@ -615,10 +634,10 @@ THEMES = {
     #favoriteStar:checked { color: #a8893f; }
     #emptyText { color: #c2cddb; background: transparent; border: 0; padding: 0; font-size: 15px; font-weight: 500; line-height: 1.7; letter-spacing: 0.5px; }
     #paginationBar { min-height: 22px; }
-    #paginationButton { min-height: 0; max-height: 22px; color: #e3eaf4; background: transparent; border: 1px solid #aab1ba; border-radius: 5px; padding: 0 9px; font-size: 11px; }
+    #paginationButton { min-height: 0; max-height: 22px; color: #e3eaf4; background: transparent; border: 1px solid #aab1ba; border-radius: 5px; padding: 0 6px; font-size: 11px; }
     #paginationButton:hover { color: white; background: #2d65d6; border-color: #2d65d6; }
     #paginationButton:disabled { color: #8a94a0; background: transparent; border-color: #4a545f; }
-    #pageLabel { color: #b9c6d6; min-width: 64px; font-size: 11px; qproperty-alignment: AlignCenter; }
+    #pageLabel { color: #b9c6d6; min-width: 40px; font-size: 11px; qproperty-alignment: AlignCenter; }
     #steamSyncStatus { background: transparent; border: 1px solid #aab1ba; border-radius: 7px; }
     #steamSyncLabel { color: #dbe4ef; font-size: 11px; font-weight: 700; }
     #steamSyncProgress { min-height: 6px; max-height: 6px; border: 0; border-radius: 3px; background: #c3c9d1; }

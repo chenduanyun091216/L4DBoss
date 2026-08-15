@@ -162,7 +162,7 @@ def restore_selected_collections_in_background(self) -> None:
     self.steam_sync_progress.setValue(0)
     self._set_collection_restore_status(0, 0)
     if show_restore_progress:
-        self.steam_sync_widget.show()
+        self._set_progress_visible(True)
     worker = Worker(restore_collection_files, addon_dirs[0], sorted(self._selected_collection_names), progress_callback=None)
     worker.kwargs["progress_callback"] = worker.signals.progress.emit
     worker.signals.progress.connect(self._set_collection_restore_status)
@@ -174,7 +174,7 @@ def restore_selected_collections_in_background(self) -> None:
 def on_collection_restore_finished(self, restored: int) -> None:
     if self._progress_owner == "restore":
         self._progress_owner = None
-        self.steam_sync_widget.hide()
+        self._set_progress_visible(False)
     # Apply the union of every checked collection even when no file had
     # to be restored. If files were restored, on_scan_finished applies it
     # once more after the new Mods are discovered.
@@ -186,7 +186,7 @@ def on_collection_restore_finished(self, restored: int) -> None:
 def on_collection_restore_failed(self, message: str) -> None:
     if self._progress_owner == "restore":
         self._progress_owner = None
-        self.steam_sync_widget.hide()
+        self._set_progress_visible(False)
     self._on_collection_sync_failed("当前组合", message)
 
 
@@ -198,7 +198,7 @@ def _set_collection_restore_status(self, completed: int, total: int) -> None:
     percent = round(completed * 100 / total) if total else 100
     label = self.steam_sync_widget.findChild(QLabel, "steamSyncLabel")
     if label is not None:
-        label.setText(f"正在恢复组合文件… {completed}/{total}（{percent}%）")
+        label.set_full_text(f"正在恢复组合文件… {completed}/{total}（{percent}%）")
 
 
 def _apply_pending_collection_selection(self) -> None:

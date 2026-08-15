@@ -129,6 +129,22 @@ def configured_addon_directories(self) -> list[Path]:
     return self.addon_directories(Path(game_exe)) if game_exe else []
 
 
+def open_mods_directory(self) -> None:
+    """Open the game's addons folder (where Mod VPK files are installed)."""
+    addon_dirs = self.configured_addon_directories()
+    existing = [directory for directory in addon_dirs if directory.exists()]
+    if not existing:
+        QMessageBox.information(
+            self, "无法打开 Mod 目录",
+            "尚未选择游戏目录，或未找到游戏的 addons 文件夹。\n请先点击「选择游戏」定位 left4dead2.exe。",
+        )
+        return
+    try:
+        os.startfile(str(existing[0]))
+    except OSError as exc:
+        QMessageBox.critical(self, "打开失败", f"无法打开 Mod 目录：{exc}")
+
+
 def scan_mods(self, refresh_all: bool) -> None:
     addon_dirs = self.configured_addon_directories()
     if not addon_dirs:
@@ -144,15 +160,15 @@ def scan_mods(self, refresh_all: bool) -> None:
     self.choose_button.setEnabled(False)
     self.refresh_button.setEnabled(False)
     self.toggle_all_button.setEnabled(False)
-    # Show the shared bottom progress bar (indeterminate) while scanning, so
+    # Show the shared header progress bar (indeterminate) while scanning, so
     # the page stays interactive and a toast is shown when it finishes.
     self._progress_owner = "scan"
-    self.steam_sync_widget.show()
+    self._set_progress_visible(True)
     self.steam_sync_progress.setRange(0, 0)
     self.steam_sync_progress.setValue(0)
     label = self.steam_sync_widget.findChild(QLabel, "steamSyncLabel")
     if label is not None:
-        label.setText("正在扫描游戏 Mod…")
+        label.set_full_text("正在扫描游戏 Mod…")
     worker = Worker(scan_mod_directory, existing_dirs, self.mods, refresh_all)
     worker.signals.finished.connect(self.on_scan_finished)
     worker.signals.failed.connect(self.on_worker_failed)
@@ -251,13 +267,12 @@ def fetch_steam_info(self) -> None:
     self.fetch_button.setEnabled(False)
     self.fetch_button.setText("")
     self.fetch_button.setIcon(self.style().standardIcon(QStyle.SP_BrowserStop))
-    self.fetch_button.setToolTip("取消 Steam 同步")
     self.fetch_button.setEnabled(True)
     total = len(pending_mods)
     self.steam_sync_progress.setRange(0, total)
     self.steam_sync_progress.setValue(0)
     self._set_steam_sync_status(0, total)
-    self.steam_sync_widget.show()
+    self._set_progress_visible(True)
     worker = Worker(fetch_steam_for_mods, deepcopy(pending_mods), progress_callback=None, cancel_event=self._steam_cancel_event)
     worker.kwargs["progress_callback"] = worker.signals.progress.emit
     worker.signals.progress.connect(self._set_steam_sync_status)

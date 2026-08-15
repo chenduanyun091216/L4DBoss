@@ -280,6 +280,7 @@ L4DBoss/
 ├─ docs/                   需求和补充文档
 ├─ requirements.txt        Python 依赖
 ├─ run.py                  程序入口
+├─ 打包程序.bat            一键打包脚本（自动检查环境并生成 exe）
 └─ pack                    Nuitka 打包命令
 ```
 
@@ -297,7 +298,11 @@ python -m unittest discover -s tests -v
 
 ## 打包为 Windows 可执行文件
 
-项目提供了 `pack` 文件，使用 Nuitka 将程序打包为无控制台窗口的单文件程序。先安装 Nuitka：
+项目提供了 `pack` 文件和 `打包程序.bat`，使用 Nuitka 将程序打包为无控制台窗口的单文件程序。
+
+**一键打包（推荐）**：在项目根目录双击 `打包程序.bat`，脚本会自动检查 Python、安装项目依赖和 Nuitka（如缺失），然后执行打包并显示输出文件位置。
+
+**手动打包**：先安装 Nuitka：
 
 ```powershell
 python -m pip install nuitka

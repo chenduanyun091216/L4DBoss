@@ -134,9 +134,12 @@ def _build_ui(self) -> None:
     content_layout.addWidget(self.scroll, 1)
     self.pagination_bar = QWidget()
     self.pagination_bar.setObjectName("paginationBar")
+    # 底部左侧控件（上一页/页码/下一页/卡片大小/-+）固定宽度、紧密排列：
+    # 位置不受右侧悬停提示影响，提示只占用它与右侧按钮之间的弹性空间。
+    self.pagination_bar.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
     pagination_layout = QHBoxLayout(self.pagination_bar)
     pagination_layout.setContentsMargins(0, 0, ui(8), 0)
-    pagination_layout.setSpacing(ui(8))
+    pagination_layout.setSpacing(ui(2))
     self.previous_page_button = QPushButton("上一页")
     self.previous_page_button.setObjectName("paginationButton")
     self.previous_page_button.setFixedHeight(ui(20))
@@ -144,6 +147,9 @@ def _build_ui(self) -> None:
     self.page_label = QLabel()
     self.page_label.setObjectName("pageLabel")
     self.page_label.setAlignment(Qt.AlignCenter)
+    # 去掉 #footer QLabel 规则带来的右侧 12px 内边距，让“下一页”
+    # 按钮紧贴“第 1 / 5 页”文字，而不是隔着一段空白。
+    self.page_label.setStyleSheet("padding-right: 0px;")
     self.next_page_button = QPushButton("下一页")
     self.next_page_button.setObjectName("paginationButton")
     self.next_page_button.setFixedHeight(ui(20))
@@ -151,29 +157,29 @@ def _build_ui(self) -> None:
     pagination_layout.addWidget(self.previous_page_button)
     pagination_layout.addWidget(self.page_label)
     pagination_layout.addWidget(self.next_page_button)
-    pagination_layout.addStretch(1)
     size_label = QLabel("卡片大小")
     size_label.setObjectName("pageLabel")
     size_label.setToolTip("调整卡片大小；卡片会保持宽高比例")
+    # 去掉右侧 12px 内边距使其紧贴“-”按钮，并加少量左侧内边距
+    # 让“卡片大小”文字相对“下一页”向右移一点。
+    size_label.setStyleSheet("padding-right: 0px; padding-left: 4px;")
     # 默认卡片宽度：默认窗口（1250x730）下每排显示 5 张卡片。
     self._card_size = ui(168)
     self.card_size_decrease = QPushButton("-")
     self.card_size_decrease.setObjectName("paginationButton")
-    self.card_size_decrease.setFixedSize(ui(26), ui(22))
+    self.card_size_decrease.setFixedSize(ui(22), ui(20))
     self.card_size_decrease.setToolTip("缩小卡片")
     self.card_size_decrease.clicked.connect(lambda: self._change_card_size(-ui(10)))
     self.card_size_increase = QPushButton("+")
     self.card_size_increase.setObjectName("paginationButton")
-    self.card_size_increase.setFixedSize(ui(26), ui(22))
+    self.card_size_increase.setFixedSize(ui(22), ui(20))
     self.card_size_increase.setToolTip("放大卡片")
     self.card_size_increase.clicked.connect(lambda: self._change_card_size(ui(10)))
     pagination_layout.addWidget(size_label)
     pagination_layout.addWidget(self.card_size_decrease)
     pagination_layout.addWidget(self.card_size_increase)
-    self.pagination_spacer = QWidget()
-    self.pagination_spacer.setFixedHeight(ui(10))
-    content_layout.addWidget(self.pagination_spacer)
-    content_layout.addWidget(self.pagination_bar)
+    # 分页与卡片大小控件不再占用内容区：整个上方区域留给卡片展示，
+    # 这些控件移入底部操作栏，与右侧四个操作按钮处于同一水平行。
     body.addWidget(content)
     body.setSizes([ui(275), ui(1045)])
     body.setStretchFactor(0, 0)
@@ -183,6 +189,12 @@ def _build_ui(self) -> None:
     root.addWidget(body, 1)
     root.addWidget(self._build_footer())
     self.setCentralWidget(central)
+    # 悬停提示：独立置顶小窗（Qt.Tool + WindowStaysOnTopHint），永远浮在
+    # 主窗口之上，主窗口内任何元素都无法遮盖它；不占布局、不抢焦点、
+    # 鼠标事件穿透，其余控件位置完全不受影响。
+    self.hover_overlay = HintOverlay(self)
+    self._hover_anchor: QWidget | None = None
+    self._hover_text = ""
     self._size_grip = QSizeGrip(central)
     self._size_grip.setFixedSize(ui(18), ui(18))
     self._size_grip.move(central.width() - self._size_grip.width(), central.height() - self._size_grip.height())
@@ -195,7 +207,10 @@ def _build_header(self) -> QWidget:
     header.setFixedHeight(ui(56))
     layout = QHBoxLayout(header)
     layout.setContentsMargins(ui(24), ui(4), ui(8), ui(4))
-    layout.setSpacing(ui(11))
+    # 主布局间距收窄为 1px：头部 4 个按钮放进独立子布局（内部仍为 11px），
+    # 使“主题”按钮与右上角窗口控制按钮的间隙由 11px 收窄为 1px，
+    # 整个按钮组因此整体右移约 10px。
+    layout.setSpacing(ui(1))
     brand = QVBoxLayout()
     brand.setSpacing(0)
     name_row = QHBoxLayout()
@@ -222,6 +237,9 @@ def _build_header(self) -> QWidget:
     name.setObjectName("brandButton")
     name.setToolTip("查看软件信息")
     name.clicked.connect(self.show_about)
+    # 标题右键菜单：查看 Mod 目录 / 使用手册 / 关于应用。
+    name.setContextMenuPolicy(Qt.CustomContextMenu)
+    name.customContextMenuRequested.connect(lambda pos: self._show_title_menu(name, pos))
     credit = QLabel("@ by Mr.Chen")
     credit.setObjectName("brandCredit")
     credit.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
@@ -236,34 +254,55 @@ def _build_header(self) -> QWidget:
     brand.addWidget(sub)
     layout.addLayout(brand)
     layout.addStretch(1)
-    self.header_hint = QLabel()
-    self.header_hint.setObjectName("headerHint")
-    self.header_hint.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-    self.header_hint.setMinimumWidth(ui(250))
-    self.header_hint.hide()
-    layout.addWidget(self.header_hint)
+    # 底部进度条（选择游戏/扫描 Mod/同步 Steam/恢复组合共用）位于头部
+    # “选择游戏”按钮左侧的空白区域：紧邻触发它的按钮，空闲时隐藏不占空间，
+    # 显示期间与右侧按钮同一水平行、互不遮盖。
+    self.steam_sync_widget = QWidget()
+    self.steam_sync_widget.setObjectName("steamSyncStatus")
+    self.steam_sync_widget.setFixedHeight(ui(30))
+    sync_layout = QHBoxLayout(self.steam_sync_widget)
+    sync_layout.setContentsMargins(ui(10), 0, ui(10), 0)
+    sync_layout.setSpacing(ui(8))
+    # 单行提示：不换行，文字较多时展示框随文字拉长（上限 ui(360)），
+    # 框内文字上下居中；仅当窗口过窄时才以 … 省略，避免挤出右侧按钮。
+    sync_label = SingleLineElidedLabel("正在同步 Steam 数据…", max_width=ui(360))
+    sync_label.setObjectName("steamSyncLabel")
+    sync_layout.addWidget(sync_label)
+    self.steam_sync_progress = QProgressBar()
+    self.steam_sync_progress.setObjectName("steamSyncProgress")
+    self.steam_sync_progress.setRange(0, 1)
+    self.steam_sync_progress.setTextVisible(False)
+    self.steam_sync_progress.setFixedWidth(ui(92))
+    sync_layout.addWidget(self.steam_sync_progress)
+    self.steam_sync_widget.hide()
+    layout.addWidget(self.steam_sync_widget)
+    # 同步进度条与按钮组之间保持 11px 间距（1px 主间距 + 10px 固定间距）。
+    layout.addSpacing(ui(10))
+    # 头部四个按钮（选择游戏/扫描 Mod/同步 Steam/主题）不再使用悬浮弹框
+    # 提示，悬停说明统一以置顶覆盖层显示在按钮左侧的空白区域。
     self.choose_button = self._header_button(
         QStyle.SP_FileDialogNewFolder, "选择游戏", self.choose_directory,
-        secondary=True, tooltip="选择游戏：定位 left4dead2.exe 并扫描 addons 文件夹",
+        secondary=True,
     )
     self.refresh_button = self._header_button(
         QStyle.SP_BrowserReload, "扫描 Mod", lambda: self.scan_mods(False),
-        tooltip="扫描 Mod：重新扫描本地 addons 文件夹",
     )
     self.fetch_button = self._header_button(
         QStyle.SP_ArrowDown, "同步 Steam", self.fetch_steam_info,
-        tooltip="同步 Steam：获取创意工坊 Mod 的名称、订阅数和标签",
     )
-    layout.addWidget(self.choose_button)
-    layout.addWidget(self.refresh_button)
-    layout.addWidget(self.fetch_button)
+    # 头部四个按钮放入独立子布局：按钮之间仍保持 11px 间距。
+    self.header_action_layout = QHBoxLayout()
+    self.header_action_layout.setSpacing(ui(11))
+    self.header_action_layout.addWidget(self.choose_button)
+    self.header_action_layout.addWidget(self.refresh_button)
+    self.header_action_layout.addWidget(self.fetch_button)
     for button in (self.choose_button, self.refresh_button, self.fetch_button):
         button.installEventFilter(self)
     self.toggle_all_button = self._header_button(QStyle.SP_DialogApplyButton, "全部启动", self.toggle_all_mods)
     # 虽然创建于头部，但最终被加入底部操作栏；用独立 objectName
     # 以便钛色灰主题将底部四个按钮统一样式为“幽灵绿”风格。
     self.toggle_all_button.setObjectName("toggleAllButton")
-    layout.addWidget(self.toggle_all_button)
+    self.header_action_layout.addWidget(self.toggle_all_button)
     self.theme_button = self._header_button(
         QStyle.SP_DesktopIcon, "", self._open_theme_menu,
     )
@@ -274,7 +313,8 @@ def _build_header(self) -> QWidget:
     header_action_width = max(button.sizeHint().width() for button in self._header_action_buttons) + ui(4)
     for button in self._header_action_buttons:
         button.setFixedWidth(header_action_width)
-    layout.addWidget(self.theme_button)
+    self.header_action_layout.addWidget(self.theme_button)
+    layout.addLayout(self.header_action_layout)
     close = QPushButton("×")
     close.setObjectName("closeButton")
     close.setText("×")
@@ -345,13 +385,64 @@ def restore_default_window(self) -> None:
 
 
 def _show_header_hint(self, text: str) -> None:
-    self.header_hint.setText(text)
-    self.header_hint.setVisible(True)
+    """Show the hover hint overlay, anchored left of the header buttons."""
+    if getattr(self, "_progress_visible", False):
+        # 进度条显示期间不叠加提示，避免盖住进度条。
+        return
+    self._show_hover_hint(text, self.choose_button)
 
 
 def _clear_header_hint(self) -> None:
-    self.header_hint.setVisible(False)
-    self.header_hint.clear()
+    self._clear_hover_hint()
+
+
+def _show_footer_hint(self, text: str) -> None:
+    """Show the hover hint overlay, anchored left of “全部启动”."""
+    self._show_hover_hint(text, self.toggle_all_button)
+
+
+def _clear_footer_hint(self) -> None:
+    self._clear_hover_hint()
+
+
+def _show_hover_hint(self, text: str, anchor: QWidget) -> None:
+    """Show the topmost hint chip to the left of ``anchor``.
+
+    The chip is a separate always-on-top tool window, so it is never
+    covered by anything inside the app, and no other widget moves.
+    """
+    overlay = getattr(self, "hover_overlay", None)
+    if overlay is None:
+        return
+    overlay.set_hint_text(text)
+    overlay.show_near(anchor.mapToGlobal(QPoint(0, 0)), anchor.height())
+    self._hover_anchor = anchor
+    self._hover_text = text
+
+
+def _clear_hover_hint(self) -> None:
+    overlay = getattr(self, "hover_overlay", None)
+    if overlay is None:
+        return
+    overlay.hide()
+    self._hover_anchor = None
+    self._hover_text = ""
+
+
+def _show_title_menu(self, anchor: QWidget, pos) -> None:
+    """Title (L4D2 BOSS) right-click menu: mod dir / manual / about."""
+    menu = QMenu(self)
+    menu.setObjectName("themeMenu")
+    view_dir = menu.addAction("查看 Mod 目录")
+    view_dir.setToolTip("打开游戏安装 Mod 文件的 addons 文件夹")
+    view_dir.triggered.connect(self.open_mods_directory)
+    manual = menu.addAction("使用手册")
+    manual.setToolTip("在浏览器中打开 GitHub 使用说明")
+    manual.triggered.connect(lambda: QDesktopServices.openUrl(QUrl(MANUAL_URL)))
+    about = menu.addAction("关于应用")
+    about.setToolTip("查看关于 L4D Boss")
+    about.triggered.connect(self.show_about)
+    menu.exec_(anchor.mapToGlobal(pos))
 
 
 def _update_theme_button(self) -> None:
@@ -383,8 +474,9 @@ def _open_theme_menu(self) -> None:
 
     menu = QMenu(self)
     menu.setObjectName("themeMenu")
-    # 下拉菜单宽度与主题按钮一致。
-    menu.setMinimumWidth(max(ui(1), self.theme_button.width()))
+    # 下拉菜单宽度固定为与主题按钮一致（仅设最小宽度时，菜单内容
+    # 超出按钮宽度会把菜单撑宽，与按钮不一致）。
+    menu.setFixedWidth(max(ui(1), self.theme_button.width()))
     for theme_key in THEME_ORDER:
         action = menu.addAction(THEME_LABELS.get(theme_key, theme_key))
         action.setCheckable(True)
@@ -404,9 +496,10 @@ def _set_theme(self, theme_key: str) -> None:
     self.storage.save_settings(self.settings)
     self._apply_style()
     self._update_theme_button()
+    # 树节点文字颜色随主题变化，需要重建；卡片不需要逐张 refresh_state：
+    # 窗口级样式表更换时 Qt 已自动重抛光整个子树，逐张 unpolish/polish
+    # 只是重复开销。
     self.refresh_tree()
-    for card in self._card_widgets.values():
-        card.refresh_state()
 
 @staticmethod
 
@@ -547,22 +640,9 @@ def _build_footer(self) -> QWidget:
     action_layout = QHBoxLayout(action_host)
     action_layout.setContentsMargins(0, 0, 0, 0)
     action_layout.setSpacing(self.cards_layout.horizontalSpacing())
-    self.steam_sync_widget = QWidget()
-    self.steam_sync_widget.setObjectName("steamSyncStatus")
-    sync_layout = QHBoxLayout(self.steam_sync_widget)
-    sync_layout.setContentsMargins(ui(10), 0, ui(10), 0)
-    sync_layout.setSpacing(ui(8))
-    sync_label = QLabel("正在同步 Steam 数据…")
-    sync_label.setObjectName("steamSyncLabel")
-    sync_layout.addWidget(sync_label)
-    self.steam_sync_progress = QProgressBar()
-    self.steam_sync_progress.setObjectName("steamSyncProgress")
-    self.steam_sync_progress.setRange(0, 1)
-    self.steam_sync_progress.setTextVisible(False)
-    self.steam_sync_progress.setFixedWidth(ui(92))
-    sync_layout.addWidget(self.steam_sync_progress)
-    self.steam_sync_widget.hide()
-    action_layout.addWidget(self.steam_sync_widget)
+    # 分页控件（上一页/下一页/页码）与卡片大小控件与四个操作按钮同行；
+    # 底部进度条不在此处，而是位于头部“选择游戏”按钮左侧。
+    action_layout.addWidget(self.pagination_bar)
     action_layout.addStretch(1)
     action_layout.addWidget(self.toggle_all_button)
     self.save_button = QPushButton(self.style().standardIcon(QStyle.SP_DialogSaveButton), "保 存")
@@ -582,13 +662,17 @@ def _build_footer(self) -> QWidget:
     self._footer_action_buttons = (
         self.toggle_all_button, self.save_button, self.save_as_button, self.launch_button,
     )
-    action_buttons = self._header_action_buttons + self._footer_action_buttons
-    action_width = max(button.minimumSizeHint().width() for button in action_buttons)
-    action_height = max(ui(1), max(button.minimumSizeHint().height() for button in action_buttons) - ui(2))
-    for button in self._header_action_buttons:
-        button.setFixedSize(action_width, action_height)
+    # 底部四个操作按钮的悬停提示以置顶覆盖层显示在“全部启动”按钮左侧。
     for button in self._footer_action_buttons:
-        button.setFixedSize(action_width, action_height)
+        button.installEventFilter(self)
+    # 头部按钮取各自自然宽度、高度统一；底部四个按钮统一使用“启动游戏”
+    # 按钮的宽度，保持右下角按钮组等宽（高度同样统一）。
+    action_height = max(ui(1), max(button.minimumSizeHint().height() for button in self._footer_action_buttons) - ui(2))
+    for button in self._header_action_buttons:
+        button.setFixedSize(button.minimumSizeHint().width(), action_height)
+    launch_width = self.launch_button.minimumSizeHint().width()
+    for button in self._footer_action_buttons:
+        button.setFixedSize(launch_width, action_height)
     layout.addWidget(action_host, 1)
     return footer
 
@@ -599,11 +683,30 @@ def _apply_style(self) -> None:
     # A plain ``global`` here would only rebind this module's star-imported
     # copy and leave painted widgets stuck on the previous theme.
     theme.ACTIVE_THEME = self._theme
-    app = QApplication.instance()
-    if app is not None:
-        app.setStyleSheet(THEMES.get(self._theme, THEMES["dark"]))
-    self.setStyleSheet("")
+    # 主题样式表只设置在主窗口上：对话框/菜单/提示框等以主窗口为父级，
+    # 会自动继承窗口级样式表。不能再用 QApplication.setStyleSheet——
+    # 它会同步重抛光应用中所有控件的全部规则，切换主题时明显卡顿；
+    # 窗口级只重抛光本窗口子树。无父级的 QToolTip 由启动时设置的
+    # TOOLTIP_QSS 覆盖。
+    self.setStyleSheet(THEMES.get(self._theme, THEMES["dark"]))
     # Re-evaluate button minimum sizes after the stylesheet has applied;
     # padding and font metrics are part of the real required width.
     QTimer.singleShot(0, self._sync_content_right_edges)
+
+
+def _set_progress_visible(self, visible: bool) -> None:
+    """Show/hide the shared progress bar (scan/sync/restore).
+
+    The bar lives in the header, immediately left of the “选择游戏” button,
+    on the same row as the header action buttons, so it never covers cards,
+    pagination controls or the footer actions.  Hidden widgets take no
+    layout space; while visible, hover hints are suppressed so the header
+    row never overflows.
+    """
+    self._progress_visible = bool(visible)
+    if hasattr(self, "steam_sync_widget"):
+        self.steam_sync_widget.setVisible(visible)
+    if visible and hasattr(self, "hover_overlay"):
+        # 进度条出现时立即收起悬停提示：提示是置顶小窗，会盖住进度条。
+        self._clear_header_hint()
 
