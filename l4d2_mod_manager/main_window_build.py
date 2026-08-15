@@ -551,11 +551,32 @@ def _build_content_bar(self) -> QWidget:
     title_box.addWidget(self.content_subtitle)
     layout.addWidget(self.content_title_host)
     layout.addStretch(1)
+    # 搜索框容器：左侧内嵌“只看收藏”星星按钮，视觉上与搜索框融为一体。
+    self.search_box = QWidget()
+    self.search_box.setObjectName("searchBox")
+    # 普通 QWidget 默认不绘制样式表背景/边框，必须开启 StyledBackground，
+    # 否则 #searchBox 的背景/边框不渲染，搜索框看起来只有输入框那么高。
+    self.search_box.setAttribute(Qt.WA_StyledBackground, True)
+    search_layout = QHBoxLayout(self.search_box)
+    search_layout.setContentsMargins(ui(6), 0, ui(4), 0)
+    search_layout.setSpacing(ui(4))
+    self.favorite_filter_button = QPushButton("★")
+    self.favorite_filter_button.setObjectName("favoriteFilterButton")
+    self.favorite_filter_button.setCheckable(True)
+    self.favorite_filter_button.setCursor(Qt.PointingHandCursor)
+    # 星形按钮占满搜索框高度，与右侧下拉按钮的高度观感一致。
+    self.favorite_filter_button.setFixedSize(ui(26), ui(32))
+    self.favorite_filter_button.clicked.connect(self.toggle_favorite_filter)
+    # 与其他按钮一致：悬停提示使用统一的置顶提示层，锚定在搜索框左侧空白处。
+    self.favorite_filter_button.installEventFilter(self)
+    search_layout.addWidget(self.favorite_filter_button)
     self.search_input = QLineEdit()
     self.search_input.setObjectName("searchInput")
     self.search_input.setPlaceholderText("搜索名称、作者或 Workshop ID…")
     self.search_input.setClearButtonEnabled(True)
     self.search_input.textChanged.connect(self.on_search_changed)
+    self.search_input.installEventFilter(self)
+    search_layout.addWidget(self.search_input, 1)
     self.collection_combo = MultiSelectComboBox()
     self.collection_combo.setObjectName("collectionCombo")
     self.collection_combo.setFixedWidth(ui(214))
@@ -569,7 +590,7 @@ def _build_content_bar(self) -> QWidget:
     self._filter_controls = QHBoxLayout()
     self._filter_controls.setContentsMargins(0, 0, 0, 0)
     self._filter_controls.setSpacing(ui(11))
-    self._filter_controls.addWidget(self.search_input)
+    self._filter_controls.addWidget(self.search_box)
     self._filter_controls.addWidget(self.collection_combo)
     layout.addLayout(self._filter_controls)
     return bar

@@ -138,7 +138,7 @@ def _show_content_widget(self, title: str, subtitle: str, widget: QWidget) -> No
     self.content_title.setText(title)
     self.content_subtitle.setText(subtitle)
     self.content_back_button.show()
-    self.search_input.hide()
+    self.search_box.hide()
     self.collection_combo.hide()
     self.pagination_bar.hide()
     self.cards_layout.setAlignment(Qt.AlignTop | Qt.AlignLeft)
@@ -201,7 +201,10 @@ def show_mod_list(self) -> None:
     snapshot = getattr(self, "_list_snapshot", None)
     saved_cards = getattr(self, "_saved_card_widgets", [])
     self._content_mode = "mods"
-    self._set_status_selection(self.active_label if self._active_only_filter else self.total_label)
+    if self._favorite_only_filter:
+        self._set_status_selection(None)
+    else:
+        self._set_status_selection(self.active_label if self._active_only_filter else self.total_label)
     if snapshot:
         title, subtitle, self.current_category, self.current_page = snapshot
         self.content_title.setText(title)
@@ -227,7 +230,7 @@ def show_mod_list(self) -> None:
         card.show()
         self.cards_layout.addWidget(card, index // columns, index % columns, Qt.AlignTop)
     self.content_back_button.hide()
-    self.search_input.show()
+    self.search_box.show()
     self.collection_combo.show()
     self._update_pagination(len(self.filtered_mods()), max(1, (len(self.filtered_mods()) + self.page_size - 1) // self.page_size))
     self._sync_content_right_edges()
@@ -235,9 +238,18 @@ def show_mod_list(self) -> None:
     QTimer.singleShot(0, lambda: self.scroll.verticalScrollBar().setValue(scroll_position))
 
 
+def _reset_favorite_filter_button(self) -> None:
+    """取消“只看收藏”按钮的选中态（收藏过滤随状态标签切换一起重置）。"""
+    button = getattr(self, "favorite_filter_button", None)
+    if button is not None:
+        button.setChecked(False)
+
+
 def show_active_mods(self) -> None:
     self._content_mode = "mods"
     self._active_only_filter = True
+    self._favorite_only_filter = False
+    self._reset_favorite_filter_button()
     self._set_status_selection(self.active_label)
     self._update_mod_filter_title()
     self.current_page = 0
@@ -247,7 +259,22 @@ def show_active_mods(self) -> None:
 def show_all_mods(self) -> None:
     self._content_mode = "mods"
     self._active_only_filter = False
+    self._favorite_only_filter = False
+    self._reset_favorite_filter_button()
     self._set_status_selection(self.total_label)
+    self._update_mod_filter_title()
+    self.current_page = 0
+    self.refresh_cards()
+
+
+def toggle_favorite_filter(self) -> None:
+    """切换“只看收藏”过滤：仅显示收藏的 Mod 卡片，再点一次恢复全部。"""
+    self._content_mode = "mods"
+    self._favorite_only_filter = not self._favorite_only_filter
+    if self._favorite_only_filter:
+        self._active_only_filter = False
+    self.favorite_filter_button.setChecked(self._favorite_only_filter)
+    self._set_status_selection(None)
     self._update_mod_filter_title()
     self.current_page = 0
     self.refresh_cards()

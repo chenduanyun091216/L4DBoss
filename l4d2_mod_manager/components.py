@@ -542,10 +542,14 @@ class ModCard(QFrame):
         self.toggle_button.setText("禁用 Mod" if self.mod.active else "启用 Mod")
         self.toggle_button.setObjectName("cardActionActive" if self.mod.active else "cardAction")
         self.set_favorite(self.mod.favorite)
+        # objectName 变化会影响子控件的后代选择器（如 #modCardActive #cardTitle），
+        # 只重抛光卡片本身不够：子标签的样式是按各自缓存的，必须整棵子树
+        # 重新 unpolish/polish，标题/元信息文字颜色才会跟着激活状态切换。
+        for widget in self.findChildren(QWidget):
+            widget.style().unpolish(widget)
+            widget.style().polish(widget)
         self.style().unpolish(self)
         self.style().polish(self)
-        self.toggle_button.style().unpolish(self.toggle_button)
-        self.toggle_button.style().polish(self.toggle_button)
         self._apply_scaled_fonts(self._card_width / self.BASE_WIDTH)
         self.update()
 

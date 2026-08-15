@@ -204,7 +204,7 @@ def refresh_cards(self) -> None:
     self._cards_ready_for_reflow = False
     self._show_cards_loading()
     self.content_back_button.hide()
-    self.search_input.show()
+    self.search_box.show()
     self.collection_combo.show()
     # Detach and hide existing cards instead of destroying them. Reusing
     # cards removes the noticeable pause when switching category filters.
@@ -498,6 +498,15 @@ def _sync_content_right_edges(self, force: bool = False) -> None:
     self._content_alignment_pending = False
     if not hasattr(self, "scroll"):
         return
+    # 搜索框与右侧组合下拉框高度严格一致：取两者最小高度的较大值，强制
+    # 锁定为同一高度，消除主题/字体/DPI 等因素造成的高低差异。
+    if hasattr(self, "search_box") and hasattr(self, "collection_combo"):
+        target_h = max(
+            self.search_box.minimumSizeHint().height(),
+            self.collection_combo.minimumSizeHint().height(),
+        )
+        self.search_box.setFixedHeight(target_h)
+        self.collection_combo.setFixedHeight(target_h)
     scrollbar = self.scroll.verticalScrollBar()
     # Reserve the scrollbar width even before it is visible.  This keeps
     # the toolbar, pagination and footer actions from jumping right when
@@ -543,7 +552,7 @@ def _sync_content_right_edges(self, force: bool = False) -> None:
                 search_width = max(ui(1), search_width - (title_min - title_width))
                 title_width = title_min
             self.content_title_host.setFixedWidth(max(ui(1), title_width))
-            self.search_input.setFixedWidth(max(ui(1), search_width))
+            self.search_box.setFixedWidth(max(ui(1), search_width))
             self._filter_controls.invalidate()
             self.content_bar.layout().invalidate()
             self.content_bar.layout().activate()
@@ -617,7 +626,10 @@ def _set_status_selection(self, selected_button: QPushButton) -> None:
 def _update_mod_filter_title(self) -> None:
     if self._content_mode != "mods" or self.current_category != "all":
         return
-    self.content_title.setText("已激活 Mod" if self._active_only_filter else "全部 Mod")
+    if self._favorite_only_filter:
+        self.content_title.setText("收藏 Mod")
+    else:
+        self.content_title.setText("已激活 Mod" if self._active_only_filter else "全部 Mod")
 
 
 def _simple_categories_for(self, mod: Mod) -> set[str]:

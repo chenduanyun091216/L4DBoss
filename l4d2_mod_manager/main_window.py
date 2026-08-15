@@ -76,6 +76,7 @@ class MainWindow(QMainWindow):
         self.current_page = 0
         self.category_mode = "simple"
         self._active_only_filter = False
+        self._favorite_only_filter = False
         self.thread_pool = QThreadPool.globalInstance()
         self.collection_sync_pool = QThreadPool(self)
         self.collection_sync_pool.setMaxThreadCount(1)
@@ -164,11 +165,19 @@ class MainWindow(QMainWindow):
             getattr(self, "minimize_button", None): "最小化窗口",
             getattr(self, "maximize_button", None): "最大化 / 还原窗口",
             getattr(self, "close_button", None): "关闭程序",
+            getattr(self, "favorite_filter_button", None): "只看收藏：仅显示收藏的 Mod",
             getattr(self, "toggle_all_button", None): "全部启动：启动当前所有 Mod",
             getattr(self, "save_button", None): "保存：将当前激活 Mod 存入组合",
             getattr(self, "save_as_button", None): "另存为：将当前激活 Mod 另存为",
             getattr(self, "launch_button", None): "启动游戏：启动游戏 L4D",
         }
+        if source is getattr(self, "search_input", None) and getattr(self, "search_box", None) is not None:
+            # 搜索框容器跟随输入框焦点切换“聚焦”样式。
+            if event.type() in (QEvent.FocusIn, QEvent.FocusOut):
+                self.search_box.setProperty("focused", event.type() == QEvent.FocusIn)
+                self.search_box.style().unpolish(self.search_box)
+                self.search_box.style().polish(self.search_box)
+                self.search_box.update()
         if source in hints:
             is_footer = source in getattr(self, "_footer_action_buttons", ())
             if event.type() == QEvent.Enter:
@@ -177,7 +186,11 @@ class MainWindow(QMainWindow):
                     text = self._save_hint_text()
                 else:
                     text = hints[source]
-                if is_footer:
+                if source is getattr(self, "favorite_filter_button", None):
+                    # 收藏按钮提示显示在搜索框左侧的空白区域，样式与其他按钮一致。
+                    if not getattr(self, "_progress_visible", False):
+                        self._show_hover_hint(text, self.search_box)
+                elif is_footer:
                     self._show_footer_hint(text)
                 else:
                     self._show_header_hint(text)
@@ -477,6 +490,8 @@ from .main_window_details import (
     show_mod_list,
     show_active_mods,
     show_all_mods,
+    toggle_favorite_filter,
+    _reset_favorite_filter_button,
 )
 
 MainWindow.show_card_context_menu = show_card_context_menu
@@ -487,6 +502,8 @@ MainWindow.show_mod_details = show_mod_details
 MainWindow.show_mod_list = show_mod_list
 MainWindow.show_active_mods = show_active_mods
 MainWindow.show_all_mods = show_all_mods
+MainWindow.toggle_favorite_filter = toggle_favorite_filter
+MainWindow._reset_favorite_filter_button = _reset_favorite_filter_button
 
 from .main_window_events import (
     on_worker_failed,

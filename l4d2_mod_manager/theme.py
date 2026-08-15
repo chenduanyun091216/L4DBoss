@@ -217,16 +217,16 @@ THEMES = {
     #collectionComboMenu QScrollBar::handle:vertical:hover { background: #50709a; }
     #modCard, #modCardActive, #modCardConflict { background: #18202c; border: 1px solid #293649; border-radius: 10px; }
     #modCard:hover { background: #1c2634; border: 2px solid #6aa0ff; }
-    #modCardActive { border: 2px solid #23c987; background: #12362e; }
-    #modCardActive:hover { background: #174538; border: 2px solid #55efad; }
+    #modCardActive { border: 2px solid #23c987; background: #1e5040; }
+    #modCardActive:hover { background: #25604c; border: 2px solid #55efad; }
     #modCardConflict { border: 2px solid #ff4757; background: #481923; }
     #modCardConflict:hover { background: #5a1d29; border: 2px solid #ff7885; }
-    #modCard[favorite="true"] { border: 2px solid #f5b301; background: #27291b; }
-    #modCardActive[favorite="true"] { border: 2px solid #f5b301; background: #203b2d; }
-    #modCardConflict[favorite="true"] { border: 2px solid #f5b301; background: #4b2322; }
-    #modCard[favorite="true"]:hover { border: 2px solid #ffc83d; background: #2e3122; }
-    #modCardActive[favorite="true"]:hover { border: 2px solid #ffc83d; background: #274639; }
-    #modCardConflict[favorite="true"]:hover { border: 2px solid #ffc83d; background: #5d2826; }
+    #modCard[favorite="true"] { border: 3px solid #f5b301; }
+    #modCardActive[favorite="true"] { border: 3px solid #f5b301; }
+    #modCardConflict[favorite="true"] { border: 3px solid #f5b301; }
+    #modCard[favorite="true"]:hover { border: 3px solid #ffc83d; }
+    #modCardActive[favorite="true"]:hover { border: 3px solid #ffc83d; }
+    #modCardConflict[favorite="true"]:hover { border: 3px solid #ffc83d; }
     #preview { background: #111821; border-radius: 7px; }
     #cardTitle { color: #f2f6fc; font-size: 13px; font-weight: 700; line-height: 1.32; }
     #cardMeta { color: #91a0b4; font-size: 10px; }
@@ -242,6 +242,12 @@ THEMES = {
     #favoriteStar { background: transparent; border: none; color: #6c7c93; font-size: 18px; font-weight: 700; padding: 0; }
     #favoriteStar:hover { color: #ffc83d; }
     #favoriteStar:checked { color: #f5b301; }
+    #searchBox { background: #19212e; border: 1px solid #2c384a; border-radius: 7px; }
+    #searchBox[focused="true"] { border-color: #5486ec; background: #1b2534; }
+    #searchBox #searchInput { background: transparent; border: 0; padding: 0 11px 0 0; min-width: 0; }
+    #searchBox #favoriteFilterButton { background: transparent; border: 0; color: #6c7c93; font-size: 16px; font-weight: 700; padding: 0; }
+    #searchBox #favoriteFilterButton:hover { color: #ffc83d; }
+    #searchBox #favoriteFilterButton:checked { color: #f5b301; }
     #emptyText { color: #9db2d0; background: transparent; border: 0; padding: 0; font-size: 15px; font-weight: 500; line-height: 1.7; letter-spacing: 0.5px; }
     #paginationBar { min-height: 22px; }
     #paginationButton { min-height: 0; max-height: 22px; color: #cbd7e8; background: #253247; border: 1px solid #34445c; border-radius: 5px; padding: 0 6px; font-size: 11px; }
@@ -411,16 +417,18 @@ THEMES = {
     #collectionComboMenu QScrollBar::handle:vertical:hover { background: #a3b4d1; }
     #modCard, #modCardActive, #modCardConflict { background: rgba(244, 247, 251, 250); border: 1px solid #9aa7ba; border-radius: 10px; }
     #modCard:hover { background: #ffffff; border: 2px solid #4d83eb; }
-    #modCardActive { border: 2px solid #1c4fd0; background: rgba(170, 200, 247, 255); }
-    #modCardActive:hover { background: rgba(159, 192, 242, 255); border: 2px solid #143da8; }
+    #modCardActive { border: 2px solid #1c4fd0; background: rgba(30, 80, 64, 200); }
+    #modCardActive:hover { background: rgba(37, 96, 76, 200); border: 2px solid #143da8; }
+    #modCardActive #cardTitle { color: #ffffff; }
+    #modCardActive #cardMeta, #modCardActive #typeSummary { color: #ffffff; }
     #modCardConflict { border: 2px solid #d8363f; background: rgba(242, 188, 196, 255); }
     #modCardConflict:hover { background: rgba(235, 176, 186, 255); border: 2px solid #c52832; }
-    #modCard[favorite="true"] { border: 2px solid #c98a00; background: #fdf5d7; }
-    #modCardActive[favorite="true"] { border: 2px solid #c98a00; background: #e2e0ba; }
-    #modCardConflict[favorite="true"] { border: 2px solid #c98a00; background: #f4dcbd; }
-    #modCard[favorite="true"]:hover { border: 2px solid #f5b301; background: #fdf1c2; }
-    #modCardActive[favorite="true"]:hover { border: 2px solid #f5b301; background: #dad8ad; }
-    #modCardConflict[favorite="true"]:hover { border: 2px solid #f5b301; background: #efcda4; }
+    #modCard[favorite="true"] { border: 3px solid #c98a00; }
+    #modCardActive[favorite="true"] { border: 3px solid #c98a00; }
+    #modCardConflict[favorite="true"] { border: 3px solid #c98a00; }
+    #modCard[favorite="true"]:hover { border: 3px solid #f5b301; }
+    #modCardActive[favorite="true"]:hover { border: 3px solid #f5b301; }
+    #modCardConflict[favorite="true"]:hover { border: 3px solid #f5b301; }
     #preview { background: #eef2f8; border-radius: 7px; }
     #cardTitle { color: #1d2b43; font-size: 13px; font-weight: 700; line-height: 1.32; }
     #cardMeta { color: #66748c; font-size: 10px; }
@@ -436,6 +444,12 @@ THEMES = {
     #favoriteStar { background: transparent; border: none; color: #b3bccb; font-size: 18px; font-weight: 700; padding: 0; }
     #favoriteStar:hover { color: #f5b301; }
     #favoriteStar:checked { color: #c98a00; }
+    #searchBox { background: #ffffff; border: 1px solid #aab6c8; border-radius: 7px; }
+    #searchBox[focused="true"] { border-color: #2d65d6; background: #ffffff; }
+    #searchBox #searchInput { background: transparent; border: 0; padding: 0 11px 0 0; min-width: 0; }
+    #searchBox #favoriteFilterButton { background: transparent; border: 0; color: #b3bccb; font-size: 16px; font-weight: 700; padding: 0; }
+    #searchBox #favoriteFilterButton:hover { color: #f5b301; }
+    #searchBox #favoriteFilterButton:checked { color: #c98a00; }
     #emptyText { color: #5f718e; background: transparent; border: 0; padding: 0; font-size: 15px; font-weight: 500; line-height: 1.7; letter-spacing: 0.5px; }
     #paginationBar { min-height: 22px; }
     #paginationButton { min-height: 0; max-height: 22px; color: #3c4e6b; background: #e9eef7; border: 1px solid #aab6c8; border-radius: 5px; padding: 0 6px; font-size: 11px; }
@@ -607,16 +621,18 @@ THEMES = {
     #collectionComboMenu QScrollBar::handle:vertical:hover { background: #7a838f; }
     #modCard, #modCardActive, #modCardConflict { background: rgba(210, 214, 220, 112); border: 1px solid #8a919b; border-radius: 10px; }
     #modCard:hover { background: rgba(223, 226, 231, 140); border: 2px solid #7089c0; }
-    #modCardActive { border: 2px solid #3f6fce; background: rgba(150, 182, 232, 242); }
-    #modCardActive:hover { background: rgba(134, 170, 228, 248); border: 2px solid #2f5cb0; }
+    #modCardActive { border: 2px solid #3f6fce; background: rgba(30, 80, 64, 200); }
+    #modCardActive:hover { background: rgba(37, 96, 76, 200); border: 2px solid #2f5cb0; }
+    #modCardActive #cardTitle { color: #ffffff; }
+    #modCardActive #cardMeta, #modCardActive #typeSummary { color: #ffffff; }
     #modCardConflict { border: 2px solid #cf4a58; background: rgba(244, 180, 192, 242); }
     #modCardConflict:hover { background: rgba(238, 164, 178, 248); border: 2px solid #b03a47; }
-    #modCard[favorite="true"] { border: 2px solid #a8893f; background: rgba(216, 210, 172, 112); }
-    #modCardActive[favorite="true"] { border: 2px solid #a8893f; background: rgba(178, 184, 148, 242); }
-    #modCardConflict[favorite="true"] { border: 2px solid #a8893f; background: rgba(240, 194, 152, 242); }
-    #modCard[favorite="true"]:hover { border: 2px solid #c5a74e; background: rgba(224, 218, 180, 140); }
-    #modCardActive[favorite="true"]:hover { border: 2px solid #c5a74e; background: rgba(166, 178, 136, 248); }
-    #modCardConflict[favorite="true"]:hover { border: 2px solid #c5a74e; background: rgba(232, 180, 138, 248); }
+    #modCard[favorite="true"] { border: 3px solid #a8893f; }
+    #modCardActive[favorite="true"] { border: 3px solid #a8893f; }
+    #modCardConflict[favorite="true"] { border: 3px solid #a8893f; }
+    #modCard[favorite="true"]:hover { border: 3px solid #c5a74e; }
+    #modCardActive[favorite="true"]:hover { border: 3px solid #c5a74e; }
+    #modCardConflict[favorite="true"]:hover { border: 3px solid #c5a74e; }
     #preview { background: #bcc1c9; border-radius: 7px; }
     #cardTitle { color: #3c4652; font-size: 13px; font-weight: 700; line-height: 1.32; }
     #cardMeta { color: #5f6a76; font-size: 10px; }
@@ -632,6 +648,12 @@ THEMES = {
     #favoriteStar { background: transparent; border: none; color: #969da7; font-size: 18px; font-weight: 700; padding: 0; }
     #favoriteStar:hover { color: #c5a74e; }
     #favoriteStar:checked { color: #a8893f; }
+    #searchBox { background: #3f4854; border: 1px solid #56606c; border-radius: 7px; }
+    #searchBox[focused="true"] { border-color: #2d65d6; background: #47505d; }
+    #searchBox #searchInput { background: transparent; border: 0; padding: 0 11px 0 0; min-width: 0; }
+    #searchBox #favoriteFilterButton { background: transparent; border: 0; color: #969da7; font-size: 16px; font-weight: 700; padding: 0; }
+    #searchBox #favoriteFilterButton:hover { color: #c5a74e; }
+    #searchBox #favoriteFilterButton:checked { color: #a8893f; }
     #emptyText { color: #c2cddb; background: transparent; border: 0; padding: 0; font-size: 15px; font-weight: 500; line-height: 1.7; letter-spacing: 0.5px; }
     #paginationBar { min-height: 22px; }
     #paginationButton { min-height: 0; max-height: 22px; color: #e3eaf4; background: transparent; border: 1px solid #aab1ba; border-radius: 5px; padding: 0 6px; font-size: 11px; }

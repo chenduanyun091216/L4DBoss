@@ -322,4 +322,7 @@ def toggle_favorite(self, mod_id: str) -> None:
     card = self._card_widgets.get(mod_id)
     if card is not None:
         card.set_favorite(mod.favorite)
+    if self._favorite_only_filter and not mod.favorite:
+        # “只看收藏”视图下取消收藏：卡片应立即从列表中移除。
+        self.refresh_cards()
 

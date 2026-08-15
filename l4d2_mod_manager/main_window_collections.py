@@ -73,6 +73,8 @@ def filtered_mods(self) -> list[Mod]:
     mods = list(self.mods.values())
     if self._active_only_filter:
         mods = [mod for mod in mods if mod.active]
+    if self._favorite_only_filter:
+        mods = [mod for mod in mods if mod.favorite]
     if self.current_category != "all":
         if self.category_mode == "simple":
             mods = [
