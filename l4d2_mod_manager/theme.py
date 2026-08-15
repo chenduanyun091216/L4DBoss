@@ -147,8 +147,8 @@ THEMES = {
     #brandCredit { color: #8291a8; font-size: 11px; font-weight: 700; }
     #brandSub, #contentSubtitle { color: #8090a8; font-size: 10px; font-weight: 700; letter-spacing: 1px; }
     #headerHint { color: #a9bbd5; font-size: 11px; font-weight: 600; padding-right: 8px; }
-    #headerButton, #headerButtonSecondary, #primaryButton, #secondaryButton, #launchButton { background: #273347; color: #d9e4f4; border: 1px solid #38465c; border-radius: 7px; padding: 8px 13px; font-weight: 700; }
-    #headerButton:hover, #headerButtonSecondary:hover, #primaryButton:hover, #secondaryButton:hover, #launchButton:hover { background: #3a5378; color: white; border: 2px solid #6aa0ff; }
+    #headerButton, #headerButtonSecondary, #primaryButton, #secondaryButton, #launchButton, #toggleAllButton { background: #273347; color: #d9e4f4; border: 1px solid #38465c; border-radius: 7px; padding: 5px 10px; font-weight: 700; }
+    #headerButton:hover, #headerButtonSecondary:hover, #primaryButton:hover, #secondaryButton:hover, #launchButton:hover, #toggleAllButton:hover { background: #3a5378; color: white; border: 2px solid #6aa0ff; }
     #headerIconButton { background: #202c40; border: 0; border-radius: 7px; padding: 0; }
     #headerIconButton:hover { background: #2d65d6; border: 0; }
     QToolTip { color: #eaf2ff; background: #202b3b; border: 1px solid #40516a; border-radius: 5px; padding: 5px 8px; }
@@ -159,7 +159,7 @@ THEMES = {
     #totalModCount:hover, #activeModCount:hover { text-decoration: underline; }
     #totalModCount[selected="true"] { border: 1px solid #75a7ff; border-radius: 6px; padding: 3px 6px; }
     #activeModCount[selected="true"] { border: 1px solid #48d89a; border-radius: 6px; padding: 3px 6px; }
-    #launchButton { background: #273347; color: #d9e4f4; border: 1px solid #38465c; border-radius: 7px; padding: 8px 13px; font-weight: 700; }
+    #launchButton { background: #273347; color: #d9e4f4; border: 1px solid #38465c; border-radius: 7px; padding: 5px 10px; font-weight: 700; }
     #launchButton:hover { background: #3a5378; color: white; border: 2px solid #6aa0ff; }
     #launchButton:disabled { color: #6a7689; background: #1c2636; border-color: #2a3548; }
     #sidebar { background: transparent; border-right: 1px solid #283242; }
@@ -214,7 +214,7 @@ THEMES = {
     #modCard[favorite="true"]:hover, #modCardActive[favorite="true"]:hover, #modCardConflict[favorite="true"]:hover {
         border: 2px solid #ffc83d;
     }
-    #preview { background: #111821; border-radius: 7px; min-height: 112px; max-height: 112px; }
+    #preview { background: #111821; border-radius: 7px; }
     #cardTitle { color: #f2f6fc; font-size: 13px; font-weight: 700; line-height: 1.32; }
     #cardMeta { color: #91a0b4; font-size: 10px; }
     #typeSummary { color: #91a0b4; font-size: 9px; font-weight: 600; padding: 0; }
@@ -222,8 +222,8 @@ THEMES = {
     #cardAction, #cardActionActive { min-height: 24px; max-height: 24px; border-radius: 6px; font-size: 11px; font-weight: 700; }
     #cardAction { color: #cbd7e8; background: #253247; border: 1px solid #34445c; }
     #cardAction:hover { color: white; background: #3c78ee; border: 2px solid #5b8ced; }
-    #cardActionActive { color: #d2ffeb; background: #167453; border: 1px solid #2be39a; }
-    #cardActionActive:hover { color: white; background: #cf4a55; border: 2px solid #ff7885; }
+    #cardActionActive { color: #cbd7e8; background: #253247; border: 1px solid #34445c; }
+    #cardActionActive:hover { color: white; background: #3c78ee; border: 2px solid #5b8ced; }
     #tagButton { border: 0; }
     #tagButton:hover { border: 1px solid #d8e7ff; padding: 0 5px; }
     #favoriteStar { background: transparent; border: none; color: #6c7c93; font-size: 18px; font-weight: 700; padding: 0; }
@@ -340,8 +340,8 @@ THEMES = {
     #brandCredit { color: #6b7a93; font-size: 11px; font-weight: 700; }
     #brandSub, #contentSubtitle { color: #5d6c85; font-size: 10px; font-weight: 700; letter-spacing: 1px; }
     #headerHint { color: #4c5d78; font-size: 11px; font-weight: 600; padding-right: 8px; }
-    #headerButton, #headerButtonSecondary, #primaryButton, #secondaryButton, #launchButton { background: #edf1f9; color: #24334c; border: 1px solid #aab6c8; border-radius: 7px; padding: 8px 13px; font-weight: 700; }
-    #headerButton:hover, #headerButtonSecondary:hover, #primaryButton:hover, #secondaryButton:hover, #launchButton:hover { background: #ffffff; color: #0b2a52; border: 2px solid #4d83eb; }
+    #headerButton, #headerButtonSecondary, #primaryButton, #secondaryButton, #launchButton, #toggleAllButton { background: #edf1f9; color: #24334c; border: 1px solid #aab6c8; border-radius: 7px; padding: 5px 10px; font-weight: 700; }
+    #headerButton:hover, #headerButtonSecondary:hover, #primaryButton:hover, #secondaryButton:hover, #launchButton:hover, #toggleAllButton:hover { background: #ffffff; color: #0b2a52; border: 2px solid #4d83eb; }
     #headerIconButton { background: #e4e9f2; border: 0; border-radius: 7px; padding: 0; }
     #headerIconButton:hover { background: #2d65d6; border: 0; }
     QToolTip { color: #22334e; background: #ffffff; border: 1px solid #c6d2e2; border-radius: 5px; padding: 5px 8px; }
@@ -405,7 +405,7 @@ THEMES = {
     #modCard[favorite="true"]:hover, #modCardActive[favorite="true"]:hover, #modCardConflict[favorite="true"]:hover {
         border: 2px solid #f5b301;
     }
-    #preview { background: #eef2f8; border-radius: 7px; min-height: 112px; max-height: 112px; }
+    #preview { background: #eef2f8; border-radius: 7px; }
     #cardTitle { color: #1d2b43; font-size: 13px; font-weight: 700; line-height: 1.32; }
     #cardMeta { color: #66748c; font-size: 10px; }
     #typeSummary { color: #66748c; font-size: 9px; font-weight: 600; padding: 0; }
@@ -413,8 +413,8 @@ THEMES = {
     #cardAction, #cardActionActive { min-height: 24px; max-height: 24px; border-radius: 6px; font-size: 11px; font-weight: 700; }
     #cardAction { color: #3c4e6b; background: #e9eef7; border: 1px solid #aab6c8; }
     #cardAction:hover { color: white; background: #3c78ee; border: 2px solid #2d65d6; }
-    #cardActionActive { color: #0b7a56; background: #d9f5ea; border: 1px solid #2be39a; }
-    #cardActionActive:hover { color: white; background: #cf4a55; border: 2px solid #b84752; }
+    #cardActionActive { color: #3c4e6b; background: #e9eef7; border: 1px solid #aab6c8; }
+    #cardActionActive:hover { color: white; background: #3c78ee; border: 2px solid #2d65d6; }
     #tagButton { border: 0; }
     #tagButton:hover { border: 1px solid #7fa6e2; padding: 0 5px; }
     #favoriteStar { background: transparent; border: none; color: #b3bccb; font-size: 18px; font-weight: 700; padding: 0; }
@@ -531,10 +531,10 @@ THEMES = {
     #brandCredit { color: #b9c6d6; font-size: 11px; font-weight: 700; }
     #brandSub, #contentSubtitle { color: #a9b6c6; font-size: 10px; font-weight: 700; letter-spacing: 1px; }
     #headerHint { color: #c2cddb; font-size: 11px; font-weight: 600; padding-right: 8px; }
-    #headerButton, #headerButtonSecondary { background: transparent; color: #e3eaf4; border: 1px solid #aab1ba; border-radius: 7px; padding: 8px 13px; font-weight: 700; }
+    #headerButton, #headerButtonSecondary { background: transparent; color: #e3eaf4; border: 1px solid #aab1ba; border-radius: 7px; padding: 5px 10px; font-weight: 700; }
     #headerButton:hover, #headerButtonSecondary:hover { background: #2d65d6; color: #ffffff; border: 2px solid #2d65d6; }
     /* 底部四个操作按钮（全部启动/保存/另存为/启动游戏）：透明底 + 国网绿描边，悬浮时背景变为国网绿 */
-    #toggleAllButton, #primaryButton, #secondaryButton, #launchButton { background: transparent; color: #e3eaf4; border: 1px solid #aab1ba; border-radius: 7px; padding: 8px 13px; font-weight: 700; }
+    #toggleAllButton, #primaryButton, #secondaryButton, #launchButton { background: transparent; color: #e3eaf4; border: 1px solid #aab1ba; border-radius: 7px; padding: 5px 10px; font-weight: 700; }
     #toggleAllButton:hover, #primaryButton:hover, #secondaryButton:hover, #launchButton:hover { background: #2d65d6; color: #ffffff; border: 2px solid #2d65d6; }
     #headerIconButton { background: #39414c; border: 0; border-radius: 7px; padding: 0; }
     #headerIconButton:hover { background: #2d65d6; border: 0; }
@@ -598,7 +598,7 @@ THEMES = {
     #modCard[favorite="true"]:hover, #modCardActive[favorite="true"]:hover, #modCardConflict[favorite="true"]:hover {
         border: 2px solid #c5a74e;
     }
-    #preview { background: #bcc1c9; border-radius: 7px; min-height: 112px; max-height: 112px; }
+    #preview { background: #bcc1c9; border-radius: 7px; }
     #cardTitle { color: #3c4652; font-size: 13px; font-weight: 700; line-height: 1.32; }
     #cardMeta { color: #5f6a76; font-size: 10px; }
     #typeSummary { color: #5f6a76; font-size: 9px; font-weight: 600; padding: 0; }
@@ -606,8 +606,8 @@ THEMES = {
     #cardAction, #cardActionActive { min-height: 24px; max-height: 24px; border-radius: 6px; font-size: 11px; font-weight: 700; }
     #cardAction { color: #3c4652; background: #acb1b8; border: 1px solid #8b929c; }
     #cardAction:hover { color: white; background: #7d93c4; border: 2px solid #7089c0; }
-    #cardActionActive { color: #4a6399; background: #e4eaf5; border: 1px solid #7d95c4; }
-    #cardActionActive:hover { color: white; background: #a5524e; border: 2px solid #8f4a45; }
+    #cardActionActive { color: #3c4652; background: #acb1b8; border: 1px solid #8b929c; }
+    #cardActionActive:hover { color: white; background: #7d93c4; border: 2px solid #7089c0; }
     #tagButton { border: 0; }
     #tagButton:hover { border: 1px solid #8b929c; padding: 0 5px; }
     #favoriteStar { background: transparent; border: none; color: #969da7; font-size: 18px; font-weight: 700; padding: 0; }
@@ -619,10 +619,10 @@ THEMES = {
     #paginationButton:hover { color: white; background: #2d65d6; border-color: #2d65d6; }
     #paginationButton:disabled { color: #8a94a0; background: transparent; border-color: #4a545f; }
     #pageLabel { color: #b9c6d6; min-width: 64px; font-size: 11px; qproperty-alignment: AlignCenter; }
-    #steamSyncStatus { background: #31404f; border: 1px solid #4a5f78; border-radius: 7px; }
-    #steamSyncLabel { color: #9fc3ff; font-size: 11px; font-weight: 700; }
-    #steamSyncProgress { min-height: 6px; max-height: 6px; border: 0; border-radius: 3px; background: #3a4a5c; }
-    #steamSyncProgress::chunk { border-radius: 3px; background: #7fb0f0; }
+    #steamSyncStatus { background: transparent; border: 1px solid #aab1ba; border-radius: 7px; }
+    #steamSyncLabel { color: #dbe4ef; font-size: 11px; font-weight: 700; }
+    #steamSyncProgress { min-height: 6px; max-height: 6px; border: 0; border-radius: 3px; background: #c3c9d1; }
+    #steamSyncProgress::chunk { border-radius: 3px; background: #9fc3ff; }
     #footer { background: transparent; border-top: 1px solid #7e848b; border-bottom-left-radius: 14px; border-bottom-right-radius: 14px; }
     #footer QLabel { color: #b9c6d6; padding-right: 12px; }
     #conflictButton { color: #ff9aa3; background: transparent; border: 0; font-weight: 700; }

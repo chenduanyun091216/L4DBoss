@@ -26,7 +26,13 @@ from PyQt5.QtWidgets import (
 )
 
 from .categories import CATEGORIES, SIMPLE_CATEGORIES, infer_categories, simple_categories
-from .collection_sync import delete_collection_folder, restore_collection_files, sync_collection_files
+from .collection_sync import (
+    delete_collection_folder,
+    rename_collection_folder,
+    restore_collection_files,
+    sanitize_collection_name,
+    sync_collection_files,
+)
 from .models import Mod, ModCollection
 from .steam_client import SteamClient
 from .storage import AppStorage
@@ -250,6 +256,45 @@ def delete_collection(self, name: str) -> None:
     self.apply_selected_collections()
 
 
+def rename_collection(self, name: str) -> None:
+    collection = next((item for item in self.collections if item.name == name), None)
+    if collection is None:
+        QMessageBox.information(self, "无法修改", "找不到指定组合。")
+        return
+    new_name, ok = QInputDialog.getText(self, "修改组合名称", "新的组合名称：", text=collection.name)
+    if not ok:
+        return
+    new_name = new_name.strip()
+    if not new_name:
+        QMessageBox.warning(self, "无法修改", "组合名称不能为空。")
+        return
+    if new_name == collection.name:
+        return
+    if any(item.name == new_name for item in self.collections):
+        QMessageBox.warning(self, "无法修改", f"组合「{new_name}」已存在，请换一个名称。")
+        return
+    if sanitize_collection_name(new_name) is None:
+        QMessageBox.warning(self, "无法修改", f"名称「{new_name}」不能作为组合名称。")
+        return
+    addon_dirs = self.configured_addon_directories()
+    if addon_dirs:
+        ok_rename, message = rename_collection_folder(addon_dirs[0], collection.name, new_name)
+        if not ok_rename:
+            QMessageBox.warning(self, "无法修改", message)
+            return
+    old_name = collection.name
+    collection.name = new_name
+    was_selected = old_name in self._selected_collection_names
+    self._selected_collection_names.discard(old_name)
+    if was_selected:
+        self._selected_collection_names.add(new_name)
+    self.save_selected_collection_names()
+    self.storage.save_collections(self.collections)
+    self.refresh_collection_combo()
+    self.sync_collection_in_background(collection)
+    show_toast(f"已重命名组合「{old_name}」为「{new_name}」。", self)
+
+
 def on_category_selected(self) -> None:
     if self._tree_rebuilding:
         return
@@ -288,7 +333,6 @@ def save_collection(self) -> None:
                 self.sync_collection_in_background(collection)
                 break
         self.storage.save_collections(self.collections)
-        QMessageBox.information(self, "保存完成", f"已更新组合「{current_name}」。")
         return
     if not active_ids:
         QMessageBox.information(self, "没有已启用 Mod", "请先至少启用一个 Mod。")
@@ -305,7 +349,6 @@ def save_collection(self) -> None:
         self._selected_collection_names = {name}
         self.save_selected_collection_names()
         self.refresh_collection_combo()
-        QMessageBox.information(self, "保存完成", f"已保存「{name}」。")
 
 
 def save_collection_as_new(self) -> None:

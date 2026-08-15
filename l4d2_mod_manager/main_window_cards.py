@@ -499,27 +499,29 @@ def _sync_content_right_edges(self, force: bool = False) -> None:
     # shares the right edge of the last card as well.
     if hasattr(self, "search_input") and hasattr(self, "collection_combo"):
         control_width = self.card_width(self.card_columns())
+        grid_gap = self.cards_layout.horizontalSpacing()
+        self._filter_controls.setSpacing(grid_gap)
         self.collection_combo.setFixedWidth(control_width)
-        # Derive both filter widths from the target card edge.  Reading
-        # the combo box's current position here retains stale geometry
-        # after maximizing and can push it beyond the card grid.
+        # The search box spans exactly two card columns (including the gap
+        # between them) and the combo occupies the last card column, so the
+        # whole filter row stays right-aligned to the card grid and grows
+        # together with the cards.
         if hasattr(self, "choose_button"):
             content_left = self.content_bar.mapToGlobal(QPoint(0, 0)).x()
             bar_gap = self.content_bar.layout().spacing()
-            # A compact window can place the header button left of the
-            # content area. Never let that make the filter layout extend
-            # outside its own parent.
-            # The title and the outer layout's gap precede the filters,
-            # so account for both when the header button falls outside a
-            # compact content area.
-            target_left = max(
-                content_left + ui(1) + bar_gap,
-                self.choose_button.mapToGlobal(QPoint(0, 0)).x(),
-            )
-            self.content_title_host.setFixedWidth(target_left - content_left - bar_gap)
-            self.search_input.setFixedWidth(max(
-                ui(1), grid_right - target_left - control_width - self._filter_controls.spacing(),
-            ))
+            filter_gap = self._filter_controls.spacing()
+            search_width = 2 * control_width + grid_gap
+            search_left = grid_right - control_width - filter_gap - search_width
+            # Keep the left-side title readable: when the cards are enlarged
+            # so far that the two-column search would cover the title, shrink
+            # the search box instead of letting it overlap the text.
+            title_width = search_left - content_left - bar_gap
+            title_min = ui(150)
+            if title_width < title_min:
+                search_width = max(ui(1), search_width - (title_min - title_width))
+                title_width = title_min
+            self.content_title_host.setFixedWidth(max(ui(1), title_width))
+            self.search_input.setFixedWidth(max(ui(1), search_width))
             self._filter_controls.invalidate()
             self.content_bar.layout().invalidate()
             self.content_bar.layout().activate()
@@ -532,6 +534,9 @@ def _sync_content_right_edges(self, force: bool = False) -> None:
         action_height = max(ui(1), max(button.minimumSizeHint().height() for button in action_buttons) - ui(2))
         for button in action_buttons:
             button.setFixedSize(action_width, action_height)
+        # 底部提示进度条（扫描/同步/恢复共用）与按钮保持同一高度。
+        if hasattr(self, "steam_sync_widget"):
+            self.steam_sync_widget.setFixedHeight(max(action_height, ui(1)))
     if hasattr(self, "action_host"):
         # The footer starts after the fixed sidebar.  Mirror the content
         # area's outer gutter and scrollbar inset for a shared right edge.

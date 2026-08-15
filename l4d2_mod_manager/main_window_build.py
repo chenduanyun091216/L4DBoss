@@ -155,7 +155,8 @@ def _build_ui(self) -> None:
     size_label = QLabel("卡片大小")
     size_label.setObjectName("pageLabel")
     size_label.setToolTip("调整卡片大小；卡片会保持宽高比例")
-    self._card_size = ui(214)
+    # 默认卡片宽度：默认窗口（1250x730）下每排显示 5 张卡片。
+    self._card_size = ui(168)
     self.card_size_decrease = QPushButton("-")
     self.card_size_decrease.setObjectName("paginationButton")
     self.card_size_decrease.setFixedSize(ui(26), ui(22))
@@ -339,7 +340,7 @@ def toggle_maximized(self) -> None:
 def restore_default_window(self) -> None:
     """Restore the main window to its normal startup dimensions."""
     self.showNormal()
-    self.resize(ui(1200), ui(820))
+    self.resize(ui(1250), ui(730))
     self._schedule_window_state_alignment()
 
 
@@ -382,6 +383,8 @@ def _open_theme_menu(self) -> None:
 
     menu = QMenu(self)
     menu.setObjectName("themeMenu")
+    # 下拉菜单宽度与主题按钮一致。
+    menu.setMinimumWidth(max(ui(1), self.theme_button.width()))
     for theme_key in THEME_ORDER:
         action = menu.addAction(THEME_LABELS.get(theme_key, theme_key))
         action.setCheckable(True)
@@ -469,6 +472,7 @@ def _build_content_bar(self) -> QWidget:
     self.collection_combo.view().setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
     self.collection_combo.selection_changed.connect(self.on_collection_selection_changed)
     self.collection_combo.collection_delete_requested.connect(self.delete_collection)
+    self.collection_combo.collection_rename_requested.connect(self.rename_collection)
     self._filter_controls = QHBoxLayout()
     self._filter_controls.setContentsMargins(0, 0, 0, 0)
     self._filter_controls.setSpacing(ui(11))

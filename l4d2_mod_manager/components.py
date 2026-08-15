@@ -193,8 +193,10 @@ class ModCard(QFrame):
         self.setProperty("favorite", "true" if mod.favorite else "false")
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(ui(10), ui(10), ui(10), ui(8))
-        layout.setSpacing(ui(0))
+        layout.setContentsMargins(ui(10), ui(10), ui(10), 0)
+        # 注意不能用 ui(0)：ui() 会把 0 抬升为 1，导致卡片内每项之间
+        # 多出 1px 间距，内容总高超过固定卡片高度后标题会压到预览图上。
+        layout.setSpacing(0)
         preview = HoverPreview(mod, card_width - ui(20), ui(112), self)
         preview.setObjectName("preview")
         self.preview = preview
@@ -226,6 +228,8 @@ class ModCard(QFrame):
         meta.setWordWrap(True)
         meta.setFixedHeight(ui(14))
         self.meta_label = meta
+        # 标题与上方预览图、与下方文字保持相同间距。
+        layout.addSpacing(ui(2))
         layout.addWidget(meta)
 
         type_labels = [text for text, _color in mod_type_tags(mod)]
@@ -247,7 +251,7 @@ class ModCard(QFrame):
         if mod.active:
             tags.addWidget(make_tag("已启用", "#2d65d6"))
         if mod.conflict_with:
-            tags.addWidget(make_tag("存在冲突", "#ff7070"))
+            tags.addWidget(make_tag("冲突", "#ff7070"))
         self._add_source_tag(tags)
         tags.addStretch(1)
         tags.addWidget(star)
@@ -266,6 +270,8 @@ class ModCard(QFrame):
         button.clicked.connect(lambda: self.clicked.emit(self.mod.id))
         action_row.addWidget(button, 1)
         layout.addLayout(action_row)
+        # 按钮在标签行与卡片下边界之间上下居中：上下各一个等比例 stretch。
+        layout.addStretch(1)
         self.set_card_width(target_width)
 
     def set_card_width(self, width: int) -> None:
@@ -279,12 +285,15 @@ class ModCard(QFrame):
         if width == self._card_width:
             return
         scale = width / self.BASE_WIDTH
-        height = max(ui(190), round(self.BASE_HEIGHT * scale))
+        # 卡片 QSS 的 1px 边框会让 contentsRect 上下各少 1px，可用高度 = 卡片高 - 2。
+        # 不补偿时小尺寸卡片内容会溢出 1px，布局被迫压缩预览图，导致标题与图片
+        # 的间隙比标题与下方文字的间隙少 1px。
+        height = max(ui(190), round(self.BASE_HEIGHT * scale) + 2)
         self._card_width = width
         self.setFixedSize(width, height)
         self.layout().setContentsMargins(
             round(ui(10) * scale), round(ui(10) * scale),
-            round(ui(10) * scale), round(ui(8) * scale),
+            round(ui(10) * scale), 0,
         )
         self.preview.setFixedSize(max(1, width - round(ui(20) * scale)), round(ui(112) * scale))
         self.title_label.setFixedHeight(round(ui(40) * scale))
@@ -404,7 +413,7 @@ class ModCard(QFrame):
         if self.mod.active:
             self.tags_layout.addWidget(make_tag("已启用", "#2d65d6"))
         if self.mod.conflict_with:
-            self.tags_layout.addWidget(make_tag("存在冲突", "#ff7070"))
+            self.tags_layout.addWidget(make_tag("冲突", "#ff7070"))
         self._add_source_tag(self.tags_layout)
         self.tags_layout.addStretch(1)
         if self.favorite_star.parent() is not self.tags_layout:
@@ -1188,12 +1197,16 @@ def show_toast(message: str, parent=None) -> None:
         toast.move(x, y)
     toast.show()
 class CollectionItemDelegate(QStyledItemDelegate):
-    """Paint a compact delete affordance on the right side of each collection."""
+    """Paint compact edit/delete affordances on the right side of each collection."""
 
+    edit_width = 18
     delete_width = 34
 
     def paint(self, painter, option, index):
         option = QStyleOptionViewItem(option)
+        edit_rect = option.rect.adjusted(
+            option.rect.width() - self.edit_width - self.delete_width, 0, -self.delete_width, 0
+        )
         delete_rect = option.rect.adjusted(option.rect.width() - self.delete_width, 0, 0, 0)
         # This is a multi-check popup, not a single-selection list.  Remove
         # the default blue hover/selection state while keeping each item's
@@ -1202,12 +1215,23 @@ class CollectionItemDelegate(QStyledItemDelegate):
         option.state &= ~QStyle.State_Selected
         super().paint(painter, option, index)
         painter.save()
-        # The delete affordance is painted after the default delegate, so
-        # restore the normal popup background in its area as well.
-        painter.fillRect(delete_rect, option.palette.base().color())
-        painter.setPen(QColor(
+        # The edit/delete affordances are painted after the default delegate,
+        # so restore the normal popup background in their areas as well.
+        background = option.palette.base().color()
+        painter.fillRect(edit_rect, background)
+        painter.fillRect(delete_rect, background)
+        accent = QColor(
             theme_color("tree_default") if index.data(Qt.UserRole) == "default" else theme_color("tree_favorite")
-        ))
+        )
+        # The pen glyph carries much more visual weight than the slim "×", so
+        # render it a few points smaller; it also hugs the delete button so
+        # the two affordances read as one compact right-aligned control.
+        glyph_rect = edit_rect.adjusted(0, 0, 0, 0)
+        glyph_rect.setLeft(max(edit_rect.left(), edit_rect.right() - ui(16)))
+        painter.setPen(QColor(theme_color("tree_default")))
+        painter.setFont(QFont("Segoe UI Symbol", max(6, ui(7))))
+        painter.drawText(glyph_rect, Qt.AlignCenter, "✎")
+        painter.setPen(accent)
         painter.drawText(delete_rect, Qt.AlignCenter, "×")
         painter.restore()
 class MultiSelectComboBox(QComboBox):
@@ -1215,6 +1239,7 @@ class MultiSelectComboBox(QComboBox):
 
     selection_changed = pyqtSignal()
     collection_delete_requested = pyqtSignal(str)
+    collection_rename_requested = pyqtSignal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1284,8 +1309,12 @@ class MultiSelectComboBox(QComboBox):
             index = self.view().indexAt(event.pos())
             if index.isValid():
                 item_rect = self.view().visualRect(index)
-                if event.pos().x() >= item_rect.right() - CollectionItemDelegate.delete_width:
+                right_gap = item_rect.right() - event.pos().x()
+                if right_gap < CollectionItemDelegate.delete_width:
                     self.collection_delete_requested.emit(str(self.itemData(index.row())))
+                    return True
+                if right_gap < CollectionItemDelegate.delete_width + CollectionItemDelegate.edit_width:
+                    self.collection_rename_requested.emit(str(self.itemData(index.row())))
                     return True
                 state = self.model().data(index, Qt.CheckStateRole)
                 next_state = Qt.Unchecked if state == Qt.Checked else Qt.Checked
@@ -1293,6 +1322,19 @@ class MultiSelectComboBox(QComboBox):
                 self.model().setData(index, next_state, Qt.CheckStateRole)
                 self.selection_changed.emit()
                 return True
+        if source is self.view().viewport() and event.type() == QEvent.MouseMove:
+            index = self.view().indexAt(event.pos())
+            if index.isValid():
+                item_rect = self.view().visualRect(index)
+                right_gap = item_rect.right() - event.pos().x()
+                if right_gap < CollectionItemDelegate.delete_width:
+                    self.view().setToolTip("删除组合")
+                elif right_gap < CollectionItemDelegate.delete_width + CollectionItemDelegate.edit_width:
+                    self.view().setToolTip("修改组合名称")
+                else:
+                    self.view().setToolTip("")
+            else:
+                self.view().setToolTip("")
         if source is self.view().viewport() and event.type() == QEvent.MouseButtonRelease:
             # Consume the release too. QComboBox normally treats it as a
             # completed single selection and closes its popup.

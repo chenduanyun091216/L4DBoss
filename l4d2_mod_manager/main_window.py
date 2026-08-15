@@ -42,7 +42,7 @@ class MainWindow(QMainWindow):
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setWindowIcon(QIcon(str(TITLE_ICON)))
         self.setWindowTitle("L4D2 Boss · 求生之路 2 Mod 管理器")
-        self.resize(ui(1200), ui(820))
+        self.resize(ui(1250), ui(730))
         self.setMinimumSize(ui(1020), ui(680))
         self.storage = AppStorage(USER_DATA_ROOT)
         self.settings = self.storage.load_settings()
@@ -349,6 +349,7 @@ from .main_window_collections import (
     save_selected_collection_names,
     apply_selected_collections,
     delete_collection,
+    rename_collection,
     on_category_selected,
     _run_category_refresh,
     save_collection,
@@ -373,6 +374,7 @@ MainWindow._apply_pending_collection_selection = _apply_pending_collection_selec
 MainWindow.save_selected_collection_names = save_selected_collection_names
 MainWindow.apply_selected_collections = apply_selected_collections
 MainWindow.delete_collection = delete_collection
+MainWindow.rename_collection = rename_collection
 MainWindow.on_category_selected = on_category_selected
 MainWindow._run_category_refresh = _run_category_refresh
 MainWindow.save_collection = save_collection

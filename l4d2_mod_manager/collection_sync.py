@@ -49,9 +49,27 @@ def ensure_collections_root(addons_root: Path) -> Path:
     return root
 
 
-def collection_folder(addons_root: Path, collection_name: str) -> Path | None:
+def sanitize_collection_name(collection_name: str) -> str | None:
+    """Return the folder-safe collection name, or None when it is unusable.
+
+    Windows-illegal characters are replaced with underscores; names that are
+    empty after trimming or reserved (``workshop``, ``.``, ``..``, the hidden
+    collections folder itself) cannot be used.
+    """
+    trimmed = collection_name.strip()
     safe_name = re.sub(r'[<>:"/\\|?*]', "_", collection_name).strip(" .")
-    if not safe_name or safe_name.casefold() in {"workshop", ".", "..", COLLECTIONS_DIR_NAME}:
+    if (
+        not safe_name
+        or trimmed.casefold() in {"workshop", ".", "..", COLLECTIONS_DIR_NAME}
+        or safe_name.casefold() in {"workshop", ".", "..", COLLECTIONS_DIR_NAME}
+    ):
+        return None
+    return safe_name
+
+
+def collection_folder(addons_root: Path, collection_name: str) -> Path | None:
+    safe_name = sanitize_collection_name(collection_name)
+    if safe_name is None:
         return None
     root = collections_root(addons_root)
     folder = (root / safe_name).resolve()
@@ -100,6 +118,32 @@ def delete_collection_folder(addons_root: Path, collection_name: str) -> None:
     with _SYNC_LOCK:
         if folder.is_dir():
             shutil.rmtree(folder)
+
+
+def rename_collection_folder(addons_root: Path, old_name: str, new_name: str) -> tuple[bool, str]:
+    """Rename the on-disk folder of a saved collection.
+
+    Returns ``(True, "")`` on success — including when nothing was synced to
+    disk yet, or when both names map to the same folder. Returns
+    ``(False, reason)`` when the target name is unusable or the folder cannot
+    be moved; the caller should then abort the record rename.
+    """
+    old_folder = collection_folder(addons_root, old_name)
+    new_folder = collection_folder(addons_root, new_name)
+    if new_folder is None:
+        return False, f"名称「{new_name}」不能作为组合文件夹名称"
+    if old_folder is None or not old_folder.is_dir():
+        return True, ""
+    if new_folder == old_folder:
+        return True, ""
+    if new_folder.exists():
+        return False, f"文件夹「{new_folder.name}」已存在，请换一个名称"
+    with _SYNC_LOCK:
+        try:
+            old_folder.rename(new_folder)
+        except OSError as exc:
+            return False, f"组合文件夹重命名失败：{exc}"
+    return True, ""
 
 
 def restore_collection_files(addons_root: Path, collection_names: Iterable[str], progress_callback=None) -> int:
