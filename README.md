@@ -2,7 +2,11 @@
 
 一个面向《求生之路 2》（Left 4 Dead 2）的 VPK Mod 管理工具。项目使用 Python 和 PyQt5 开发，提供图形化的 Mod 扫描、分类、启用/禁用、Steam 创意工坊信息同步、冲突检测、Mod 组合管理以及游戏启动功能。
 
-> 当前版本主要面向 Windows 使用。程序会自动识别 Steam 安装的《求生之路 2》，也支持手动选择 `left4dead2.exe`。
+## 📥 立即下载
+
+[![Download L4DBoss.exe](https://img.shields.io/badge/Download-L4DBoss.exe-blue?style=for-the-badge&logo=github)](https://github.com/chenduanyun091216/L4DBoss/releases/download/L4DModManager/L4DBoss.exe)
+
+> 💡 **使用提示**：点击上方按钮即可下载最新版 `L4DBoss.exe`。若浏览器拦截，请选择“保留文件”。
 
 ## 功能概览
 
