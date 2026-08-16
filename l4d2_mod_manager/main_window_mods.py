@@ -26,6 +26,7 @@ from PyQt5.QtWidgets import (
 )
 
 from .categories import CATEGORIES, SIMPLE_CATEGORIES, infer_categories, simple_categories
+from .dependencies import dependency_label, dependency_status, resolve_dependents
 from .collection_sync import delete_collection_folder, restore_collection_files, sync_collection_files
 from .models import Mod, ModCollection
 from .steam_client import SteamClient
@@ -299,12 +300,100 @@ def toggle_all_mods(self) -> None:
 
 
 def toggle_mod(self, mod_id: str) -> None:
-    if mod_id in self.mods:
-        self.mods[mod_id].active = not self.mods[mod_id].active
-        affected = self._update_conflicts_for_toggle(mod_id)
-        self.storage.save_mods(self.mods)
-        self._refresh_card_states(affected)
-        self.refresh_stats()
+    if mod_id not in self.mods:
+        return
+    if self.mods[mod_id].active:
+        self._deactivate_mod_with_dependency_check(mod_id)
+    else:
+        self._activate_mod_with_dependency_check(mod_id)
+
+
+def _activate_mod_with_dependency_check(self, mod_id: str) -> None:
+    """Turn a Mod on, offering to also enable its (transitive) dependencies."""
+    mod = self.mods[mod_id]
+    inactive_ids, missing_ids = dependency_status(self.mods, mod_id)
+    if not inactive_ids and not missing_ids:
+        self._set_mods_active({mod_id}, True)
+        return
+    lines = []
+    for dep_id in sorted(inactive_ids, key=lambda dep: (self.mods[dep].title or self.mods[dep].file_name).casefold()):
+        lines.append(f"• {dependency_label(self.mods, dep_id)}（当前已禁用）")
+    for dep_id in sorted(missing_ids):
+        lines.append(f"• {dependency_label(self.mods, dep_id)}")
+    box = QMessageBox(self)
+    box.setWindowTitle("启用依赖 Mod")
+    box.setIcon(QMessageBox.Question)
+    box.setText(
+        f"「{mod.title or mod.file_name}」依赖以下 Mod：\n\n"
+        + "\n".join(lines)
+        + "\n\n是否一并启用已安装的依赖 Mod？"
+    )
+    yes_button = box.addButton("一并启用", QMessageBox.YesRole)
+    no_button = box.addButton("仅启用当前", QMessageBox.NoRole)
+    cancel_button = box.addButton("取消", QMessageBox.RejectRole)
+    box.exec_()
+    clicked = box.clickedButton()
+    if clicked is cancel_button:
+        return
+    targets = {mod_id}
+    if clicked is yes_button:
+        targets.update(inactive_ids)
+    self._set_mods_active(targets, True)
+
+
+def _deactivate_mod_with_dependency_check(self, mod_id: str) -> None:
+    """Turn a Mod off, warning when other active Mods depend on it."""
+    dependents = resolve_dependents(self.mods, mod_id)
+    if dependents:
+        lines = "\n".join(
+            f"• {self.mods[dep].title or self.mods[dep].file_name}"
+            for dep in sorted(dependents, key=lambda dep: (self.mods[dep].title or self.mods[dep].file_name).casefold())
+        )
+        box = QMessageBox(self)
+        box.setWindowTitle("停用被依赖的 Mod")
+        box.setIcon(QMessageBox.Warning)
+        box.setText(
+            f"以下已启用的 Mod 依赖「{self.mods[mod_id].title or self.mods[mod_id].file_name}」：\n\n{lines}\n\n"
+            "停用后它们可能无法正常工作，仍要停用吗？"
+        )
+        yes_button = box.addButton("仍要停用", QMessageBox.DestructiveRole)
+        cancel_button = box.addButton("取消", QMessageBox.RejectRole)
+        box.exec_()
+        if box.clickedButton() is not yes_button:
+            return
+    self._set_mods_active({mod_id}, False)
+
+
+def _set_mods_active(self, mod_ids: set[str], active: bool) -> None:
+    """Apply an active-state change to several Mods and refresh once."""
+    affected: set[str] = set()
+    for mod_id in mod_ids:
+        mod = self.mods.get(mod_id)
+        if mod is None or mod.active == active:
+            continue
+        mod.active = active
+        affected.update(self._update_conflicts_for_toggle(mod_id))
+    if not affected:
+        return
+    self.storage.save_mods(self.mods)
+    self._refresh_card_states(affected)
+    self.refresh_stats()
+
+
+def manage_dependencies(self, mod_id: str) -> None:
+    """Open the dependency editor for one Mod and persist the result."""
+    mod = self.mods.get(mod_id)
+    if mod is None:
+        return
+    dialog = DependencyDialog(mod, self.mods, self)
+    if dialog.exec_() != QDialog.Accepted:
+        return
+    mod.dependencies = dialog.dependency_ids()
+    self.storage.save_mods(self.mods)
+    card = self._card_widgets.get(mod_id)
+    if card is not None:
+        card.refresh_state()
+    self.refresh_stats()
 
 
 def toggle_favorite(self, mod_id: str) -> None:

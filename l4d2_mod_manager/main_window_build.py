@@ -569,7 +569,23 @@ def _build_content_bar(self) -> QWidget:
     self.favorite_filter_button.clicked.connect(self.toggle_favorite_filter)
     # 与其他按钮一致：悬停提示使用统一的置顶提示层，锚定在搜索框左侧空白处。
     self.favorite_filter_button.installEventFilter(self)
-    search_layout.addWidget(self.favorite_filter_button)
+    # “改”过滤按钮：默认只有轮廓线；点击后变红色背景并只显示改过名字的卡片。
+    self.custom_title_filter_button = QPushButton("改")
+    self.custom_title_filter_button.setObjectName("customTitleFilterButton")
+    self.custom_title_filter_button.setCheckable(True)
+    self.custom_title_filter_button.setCursor(Qt.PointingHandCursor)
+    # 小圆点外形：圆框紧贴“改”字（内边距约 1px），整体最紧凑。
+    self.custom_title_filter_button.setFixedSize(ui(12), ui(12))
+    self.custom_title_filter_button.setToolTip("只看改名：仅显示自定义了名称的 Mod")
+    self.custom_title_filter_button.clicked.connect(self.toggle_custom_title_filter)
+    self.custom_title_filter_button.installEventFilter(self)
+    # 星形与“改”组成紧凑子布局，二者间距更小。
+    star_filter_group = QHBoxLayout()
+    star_filter_group.setContentsMargins(0, 0, 0, 0)
+    star_filter_group.setSpacing(0)
+    star_filter_group.addWidget(self.favorite_filter_button)
+    star_filter_group.addWidget(self.custom_title_filter_button)
+    search_layout.addLayout(star_filter_group)
     self.search_input = QLineEdit()
     self.search_input.setObjectName("searchInput")
     self.search_input.setPlaceholderText("搜索名称、作者或 Workshop ID…")

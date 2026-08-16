@@ -77,6 +77,7 @@ class MainWindow(QMainWindow):
         self.category_mode = "simple"
         self._active_only_filter = False
         self._favorite_only_filter = False
+        self._custom_title_only_filter = False
         self.thread_pool = QThreadPool.globalInstance()
         self.collection_sync_pool = QThreadPool(self)
         self.collection_sync_pool.setMaxThreadCount(1)
@@ -166,6 +167,7 @@ class MainWindow(QMainWindow):
             getattr(self, "maximize_button", None): "最大化 / 还原窗口",
             getattr(self, "close_button", None): "关闭程序",
             getattr(self, "favorite_filter_button", None): "只看收藏：仅显示收藏的 Mod",
+            getattr(self, "custom_title_filter_button", None): "只看改名：仅显示改过名字的 Mod",
             getattr(self, "toggle_all_button", None): "全部启动：启动当前所有 Mod",
             getattr(self, "save_button", None): "保存：将当前激活 Mod 存入组合",
             getattr(self, "save_as_button", None): "另存为：将当前激活 Mod 另存为",
@@ -299,6 +301,7 @@ from .main_window_cards import (
     on_category_mode_switch_changed,
     refresh_cards,
     _populate_cards_batch,
+    on_card_custom_title_changed,
     _update_pagination,
     change_page,
     on_search_changed,
@@ -336,6 +339,7 @@ MainWindow._refresh_tree_foregrounds = _refresh_tree_foregrounds
 MainWindow.on_category_mode_switch_changed = on_category_mode_switch_changed
 MainWindow.refresh_cards = refresh_cards
 MainWindow._populate_cards_batch = _populate_cards_batch
+MainWindow.on_card_custom_title_changed = on_card_custom_title_changed
 MainWindow._update_pagination = _update_pagination
 MainWindow.change_page = change_page
 MainWindow.on_search_changed = on_search_changed
@@ -377,6 +381,10 @@ from .main_window_mods import (
     toggle_mod,
     toggle_favorite,
     open_mods_directory,
+    manage_dependencies,
+    _activate_mod_with_dependency_check,
+    _deactivate_mod_with_dependency_check,
+    _set_mods_active,
 )
 
 MainWindow.choose_directory = choose_directory
@@ -394,6 +402,10 @@ MainWindow.toggle_all_mods = toggle_all_mods
 MainWindow.toggle_mod = toggle_mod
 MainWindow.toggle_favorite = toggle_favorite
 MainWindow.open_mods_directory = open_mods_directory
+MainWindow.manage_dependencies = manage_dependencies
+MainWindow._activate_mod_with_dependency_check = _activate_mod_with_dependency_check
+MainWindow._deactivate_mod_with_dependency_check = _deactivate_mod_with_dependency_check
+MainWindow._set_mods_active = _set_mods_active
 
 from .main_window_collections import (
     collection_names_for,
@@ -471,14 +483,22 @@ from .main_window_conflicts import (
     show_conflicts,
     _build_conflict_report,
     _add_conflict_report_group,
+    _build_conflict_group_section,
     _show_completed_conflict_report,
+    _rebuild_conflict_group_section,
+    pin_conflict_mod,
+    unpin_conflict_mod,
     disable_conflict_mod,
 )
 
 MainWindow.show_conflicts = show_conflicts
 MainWindow._build_conflict_report = _build_conflict_report
 MainWindow._add_conflict_report_group = _add_conflict_report_group
+MainWindow._build_conflict_group_section = _build_conflict_group_section
 MainWindow._show_completed_conflict_report = _show_completed_conflict_report
+MainWindow._rebuild_conflict_group_section = _rebuild_conflict_group_section
+MainWindow.pin_conflict_mod = pin_conflict_mod
+MainWindow.unpin_conflict_mod = unpin_conflict_mod
 MainWindow.disable_conflict_mod = disable_conflict_mod
 
 from .main_window_details import (
@@ -491,7 +511,9 @@ from .main_window_details import (
     show_active_mods,
     show_all_mods,
     toggle_favorite_filter,
+    toggle_custom_title_filter,
     _reset_favorite_filter_button,
+    _reset_custom_title_filter_button,
 )
 
 MainWindow.show_card_context_menu = show_card_context_menu
@@ -503,7 +525,9 @@ MainWindow.show_mod_list = show_mod_list
 MainWindow.show_active_mods = show_active_mods
 MainWindow.show_all_mods = show_all_mods
 MainWindow.toggle_favorite_filter = toggle_favorite_filter
+MainWindow.toggle_custom_title_filter = toggle_custom_title_filter
 MainWindow._reset_favorite_filter_button = _reset_favorite_filter_button
+MainWindow._reset_custom_title_filter_button = _reset_custom_title_filter_button
 
 from .main_window_events import (
     on_worker_failed,

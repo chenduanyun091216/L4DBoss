@@ -23,9 +23,14 @@ class Mod:
     favorite: bool = False
     favorite_at: int = 0
     conflict_with: list[str] = field(default_factory=list)
+    # 冲突组置顶序号：0 表示未置顶；值越大代表置顶越新。
+    # 冲突组内排序时置顶的 Mod 排在最前，addonlist.txt 中同样优先（游戏优先读取靠前条目）。
+    conflict_pin: int = 0
+    dependencies: list[str] = field(default_factory=list)
     steam_loaded: bool = False
     file_size: int = 0
     file_mtime_ns: int = 0
+    custom_title: str = ""
 
     @property
     def display_subscriptions(self) -> str:

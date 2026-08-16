@@ -23,7 +23,11 @@ def scan_mod_directory(directory: Path | list[Path], existing: dict[str, Mod] | 
             try:
                 stat = file_path.stat()
                 if (cached.file_size, cached.file_mtime_ns) == (stat.st_size, stat.st_mtime_ns):
-                    continue
+                    # VPK 本身未变：旁置预览图可能新增/更换/删除，
+                    # 与缓存比对后不一致才需要重新解析。
+                    current_image = find_preview_image(file_path)
+                    if (str(current_image.resolve()) if current_image else None) == cached.image_path:
+                        continue
             except OSError:
                 continue
         result[mod_id] = parse_vpk_file(file_path, mod_id)

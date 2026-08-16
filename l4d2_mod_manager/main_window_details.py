@@ -26,6 +26,7 @@ from PyQt5.QtWidgets import (
 )
 
 from .categories import CATEGORIES, SIMPLE_CATEGORIES, infer_categories, simple_categories
+from .dependencies import dependency_label
 from .collection_sync import delete_collection_folder, restore_collection_files, sync_collection_files
 from .models import Mod, ModCollection
 from .steam_client import SteamClient
@@ -48,6 +49,18 @@ def show_card_context_menu(self, mod_id: str, global_pos) -> None:
     steam_action = menu.addAction("同步当前 Mod Steam 信息")
     steam_action.setEnabled(bool(mod.workshop_id) and not self.steam_sync_in_progress)
     steam_action.triggered.connect(lambda: self.sync_single_mod_steam(mod_id))
+    dep_action = menu.addAction("管理依赖…")
+    dep_action.setToolTip("设置该 Mod 依赖的其他 Mod；启用时会提示一并启用")
+    dep_action.triggered.connect(lambda: self.manage_dependencies(mod_id))
+    if mod.active and mod.conflict_with:
+        if mod.conflict_pin > 0:
+            unpin_action = menu.addAction("取消置顶")
+            unpin_action.setToolTip("取消该 Mod 的置顶，恢复冲突组内的默认排序")
+            unpin_action.triggered.connect(lambda: self.unpin_conflict_mod(mod_id))
+        else:
+            pin_action = menu.addAction("置顶该 Mod（冲突优先）")
+            pin_action.setToolTip("将该 Mod 置顶为冲突组首位；生成 addonlist.txt 时同样排在最前，被游戏优先读取")
+            pin_action.triggered.connect(lambda: self.pin_conflict_mod(mod_id))
     delete_action = menu.addAction("删除 Mod")
     delete_action.setToolTip("删除该 Mod 文件及其关联预览图片")
     delete_action.triggered.connect(lambda: self.delete_mod(mod_id))
@@ -60,7 +73,7 @@ def show_card_context_menu(self, mod_id: str, global_pos) -> None:
         if collection.name in existing:
             existing_action = QWidgetAction(add_menu)
             existing_label = QLabel(
-                f'<span style="color:#dfe9f8;">{escape(collection.name)}</span>'
+                f'<span style="color:{theme_color("menu_text")};">{escape(collection.name)}</span>'
                 ' <span style="color:#ff6f7d; font-weight:700;">· 已存在</span>'
             )
             existing_label.setFixedHeight(ui(35))
@@ -160,7 +173,8 @@ def show_mod_details(self, mod: Mod) -> None:
     name.setTextInteractionFlags(Qt.TextSelectableByMouse)
     info.addWidget(name)
     code = mod.workshop_id or Path(mod.file_name).stem
-    for label, value in (("文件", mod.file_name), ("编号", code), ("作者", mod.author or "未知"), ("订阅", mod.display_subscriptions if mod.subscriptions else "暂无"), ("评分", f"{mod.rating:.1f}" if mod.rating else "暂无"), ("来源", "Steam 创意工坊" if mod.steam_loaded and mod.workshop_id else "本地文件"), ("状态", "已启用" if mod.active else "已禁用"), ("分类", "、".join(mod.categories) if mod.categories else "未分类")):
+    dep_labels = [dependency_label(self.mods, dep) for dep in mod.dependencies]
+    for label, value in (("文件", mod.file_name), ("编号", code), ("作者", mod.author or "未知"), ("订阅", mod.display_subscriptions if mod.subscriptions else "暂无"), ("评分", f"{mod.rating:.1f}" if mod.rating else "暂无"), ("来源", "Steam 创意工坊" if mod.steam_loaded and mod.workshop_id else "本地文件"), ("状态", "已启用" if mod.active else "已禁用"), ("分类", "、".join(mod.categories) if mod.categories else "未分类"), ("依赖", "、".join(dep_labels) if dep_labels else "无")):
         field = QLabel(f"{label}　{value}")
         field.setObjectName("mainDetailsField")
         field.setWordWrap(True)
@@ -172,6 +186,11 @@ def show_mod_details(self, mod: Mod) -> None:
         steam_link.setIcon(self.style().standardIcon(QStyle.SP_BrowserReload))
         steam_link.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(f"https://steamcommunity.com/sharedfiles/filedetails/?id={mod.workshop_id}")))
         info.addWidget(steam_link, 0, Qt.AlignLeft)
+    manage_deps = QPushButton("管理依赖…")
+    manage_deps.setObjectName("steamDetailsLink")
+    manage_deps.setToolTip("设置该 Mod 依赖的其他 Mod；启用时会提示一并启用")
+    manage_deps.clicked.connect(lambda: self.manage_dependencies(mod.id))
+    info.addWidget(manage_deps, 0, Qt.AlignLeft)
     info.addStretch(1)
     top.addLayout(info, 1)
     preview = QLabel()
@@ -249,7 +268,9 @@ def show_active_mods(self) -> None:
     self._content_mode = "mods"
     self._active_only_filter = True
     self._favorite_only_filter = False
+    self._custom_title_only_filter = False
     self._reset_favorite_filter_button()
+    self._reset_custom_title_filter_button()
     self._set_status_selection(self.active_label)
     self._update_mod_filter_title()
     self.current_page = 0
@@ -260,7 +281,9 @@ def show_all_mods(self) -> None:
     self._content_mode = "mods"
     self._active_only_filter = False
     self._favorite_only_filter = False
+    self._custom_title_only_filter = False
     self._reset_favorite_filter_button()
+    self._reset_custom_title_filter_button()
     self._set_status_selection(self.total_label)
     self._update_mod_filter_title()
     self.current_page = 0
@@ -278,4 +301,24 @@ def toggle_favorite_filter(self) -> None:
     self._update_mod_filter_title()
     self.current_page = 0
     self.refresh_cards()
+
+
+def toggle_custom_title_filter(self) -> None:
+    """切换“只看改名”过滤：仅显示改过名字的 Mod 卡片，再点一次恢复。"""
+    self._content_mode = "mods"
+    self._custom_title_only_filter = not self._custom_title_only_filter
+    if self._custom_title_only_filter:
+        self._active_only_filter = False
+    self.custom_title_filter_button.setChecked(self._custom_title_only_filter)
+    self._set_status_selection(None)
+    self._update_mod_filter_title()
+    self.current_page = 0
+    self.refresh_cards()
+
+
+def _reset_custom_title_filter_button(self) -> None:
+    """取消“只看改名”按钮的选中态（改名过滤随状态标签切换一起重置）。"""
+    button = getattr(self, "custom_title_filter_button", None)
+    if button is not None:
+        button.setChecked(False)
 

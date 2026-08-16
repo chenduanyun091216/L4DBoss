@@ -80,6 +80,7 @@ def _build_conflict_report(self, host: QWidget) -> None:
         "melee": "近战武器", "melee_katana": "武士刀", "melee_fireaxe": "消防斧", "melee_chainsaw": "电锯",
     }
     self._conflict_report_groups = groups
+    self._conflict_report_sections: dict[int, QFrame] = {}
     self._conflict_report_context = (host, report_host, layout, conflicted, columns, card_width, conflict_names)
     QTimer.singleShot(0, lambda: self._add_conflict_report_group(0))
 
@@ -95,6 +96,20 @@ def _add_conflict_report_group(self, index: int) -> None:
     number = index + 1
     group = self._conflict_report_groups[index]
     
+    section = self._build_conflict_group_section(group, number, columns, card_width, conflict_names)
+    self._conflict_report_sections[index] = section
+    layout.addWidget(section)
+    QTimer.singleShot(0, lambda: self._add_conflict_report_group(index + 1))
+
+
+def _build_conflict_group_section(
+    self, group: list[Mod], number: int, columns: int, card_width: int, conflict_names: dict[str, str],
+) -> QFrame:
+    """构建单个冲突组的分区卡片（冲突报告内使用）。
+
+    number 是显示用的组号（从 1 开始）；卡片顺序即组内 Mod 顺序，
+    置顶的 Mod 位于最前，与 addonlist.txt 的写入顺序保持一致。
+    """
     section = QFrame()
     section.setObjectName("mainConflictGroup")
     section_layout = QVBoxLayout(section)
@@ -126,10 +141,12 @@ def _add_conflict_report_group(self, index: int) -> None:
     for card_index, mod in enumerate(group):
         card = ConflictCard(mod, card_width)
         card.disable_requested.connect(self.disable_conflict_mod)
+        card.pin_requested.connect(self.pin_conflict_mod)
+        card.context_requested.connect(self.show_card_context_menu)
+        card.custom_title_changed.connect(self.on_card_custom_title_changed)
         grid.addWidget(card, card_index // columns, card_index % columns, Qt.AlignTop)
     section_layout.addWidget(grid_host)
-    layout.addWidget(section)
-    QTimer.singleShot(0, lambda: self._add_conflict_report_group(index + 1))
+    return section
 
 
 def _show_completed_conflict_report(self, loading_host: QWidget, report_host: QWidget, conflict_count: int) -> None:
@@ -144,8 +161,60 @@ def _show_completed_conflict_report(self, loading_host: QWidget, report_host: QW
     self.cards_layout.addWidget(report_host, 0, 0)
     report_host.show()
     self.content_subtitle.setText(
-        f"发现 {conflict_count} 个已启用 Mod 存在资源冲突；双击卡片可禁用"
+        f"发现 {conflict_count} 个已启用 Mod 存在资源冲突；单击卡片置顶优先，双击卡片禁用"
     )
+
+
+def _rebuild_conflict_group_section(self, index: int) -> None:
+    """置顶/取消置顶后就地重建指定冲突组的分区，保持滚动位置不跳变。"""
+    if self._content_mode != "detail" or not hasattr(self, "_conflict_report_context"):
+        return
+    _loading_host, _report_host, layout, _conflicted, columns, card_width, conflict_names = self._conflict_report_context
+    old = self._conflict_report_sections.get(index)
+    if old is None:
+        return
+    new = self._build_conflict_group_section(self._conflict_report_groups[index], index + 1, columns, card_width, conflict_names)
+    layout.replaceWidget(old, new)
+    old.deleteLater()
+    self._conflict_report_sections[index] = new
+
+
+def pin_conflict_mod(self, mod_id: str) -> None:
+    """将冲突组中的某个 Mod 置顶为第一位。
+
+    置顶序号（conflict_pin）取全局最大值 +1，冲突组内按该值排序：
+    最近置顶的排最前，其余保持原有相对顺序。addonlist.txt 写入时
+    同样按此顺序，使游戏优先读取置顶 Mod。
+    """
+    mod = self.mods.get(mod_id)
+    if mod is None or not (mod.active and mod.conflict_with):
+        return
+    next_pin = max((m.conflict_pin for m in self.mods.values()), default=0) + 1
+    mod.conflict_pin = next_pin
+    self.storage.save_mods(self.mods)
+    if self._content_mode == "detail" and hasattr(self, "_conflict_report_groups"):
+        for index, group in enumerate(self._conflict_report_groups):
+            if any(m.id == mod_id for m in group):
+                self._conflict_report_groups[index] = sorted(group, key=conflict_group_sort_key)
+                self._rebuild_conflict_group_section(index)
+                break
+    show_toast(f"已将「{mod.title}」置顶为冲突组首位", self)
+
+
+def unpin_conflict_mod(self, mod_id: str) -> None:
+    """取消某 Mod 的置顶，恢复其在冲突组内的默认排序。"""
+    mod = self.mods.get(mod_id)
+    if mod is None or mod.conflict_pin <= 0:
+        return
+    mod.conflict_pin = 0
+    self.storage.save_mods(self.mods)
+    if self._content_mode == "detail" and hasattr(self, "_conflict_report_groups"):
+        for index, group in enumerate(self._conflict_report_groups):
+            if any(m.id == mod_id for m in group):
+                self._conflict_report_groups[index] = sorted(group, key=conflict_group_sort_key)
+                self._rebuild_conflict_group_section(index)
+                break
+    show_toast(f"已取消「{mod.title}」的置顶", self)
 
 
 def disable_conflict_mod(self, mod_id: str) -> None:

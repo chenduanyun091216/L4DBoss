@@ -26,6 +26,7 @@ from PyQt5.QtWidgets import (
 )
 
 from .categories import CATEGORIES, SIMPLE_CATEGORIES, infer_categories, simple_categories
+from .dependencies import extract_workshop_ids
 from .collection_sync import delete_collection_folder, restore_collection_files, sync_collection_files
 from .models import Mod, ModCollection
 from .steam_client import SteamClient
@@ -286,10 +287,120 @@ def mod_type_tags(mod: Mod) -> list[tuple[str, str]]:
         for category, label in fallback_labels.items():
             add(category, label, "#526073")
     return tags
-class ModCard(QFrame):
+class CustomTitleMixin:
+    """卡片自定义名称共用逻辑：右上角修改笔 + 左侧“改”角标。
+
+    ModCard 与 ConflictCard 共用。使用方需在 __init__ 中先创建 preview 与
+    title_label（TwoLineElidedLabel），再调用 _setup_custom_title(preview, title)；
+    并自行声明 custom_title_changed = pyqtSignal(str, str) 信号。
+    """
+
+    def _setup_custom_title(self, preview: QWidget, title_label: QLabel) -> None:
+        self._custom_title = self.mod.custom_title or ""
+        self._show_custom = True
+        self.title_label = title_label
+        # 右上角“修改名称”按钮（一支笔）：点击弹出输入框修改卡片名称。
+        self._rename_button = QPushButton("✎", preview)
+        self._rename_button.setObjectName("cardRenameButton")
+        self._rename_button.setFixedSize(ui(18), ui(18))
+        self._rename_button.setCursor(Qt.PointingHandCursor)
+        self._rename_button.setToolTip("修改卡片名称")
+        self._rename_button.setStyleSheet(
+            f"QPushButton {{ background: rgba(16,22,34,0.72); color: #eaf2ff;"
+            f" border-radius: {ui(9)}px; border: 1px solid rgba(126,160,214,0.5);"
+            ' font-family: "Segoe UI Symbol", "Segoe UI"; font-size: 11px; }'
+            "QPushButton:hover { background: rgba(45,101,214,0.9); color: white; }"
+        )
+        self._rename_button.clicked.connect(self._on_rename_clicked)
+        # “改”红色圆圈（位于修改笔左侧）：点击在自定义名称与原始名称间切换。
+        self._custom_badge = QPushButton("改", preview)
+        self._custom_badge.setObjectName("customNameBadge")
+        self._custom_badge.setFixedSize(ui(18), ui(18))
+        self._custom_badge.setCursor(Qt.PointingHandCursor)
+        self._custom_badge.clicked.connect(self._toggle_custom_title)
+        self._custom_badge.hide()
+        self._refresh_title()
+        self._layout_corner_buttons()
+
+    def _effective_title(self) -> str:
+        """当前应展示的标题：优先自定义名称（可切换），否则用原始名称。"""
+        if self._custom_title and self._show_custom:
+            return self._custom_title
+        return self.mod.title or self.mod.file_name
+
+    def _refresh_title(self) -> None:
+        self.title_label.set_full_text(self._effective_title())
+        self.title_label.setToolTip(self._effective_title())
+        badge = self._custom_badge
+        badge.setVisible(bool(self._custom_title))
+        # 显示修改后的名称时角标为红色；切换回原始名称时变为主题感知的灰色。
+        if self._show_custom:
+            bg, bg_hover = "#e0393e", "#f0555a"
+            tip = "当前显示：修改后的名称（点击切换为原始名称）"
+        else:
+            bg, bg_hover = theme_color("badge_original"), theme_color("badge_original_hover")
+            tip = "当前显示：原始名称（点击切换为修改后的名称）"
+        badge.setToolTip(tip)
+        badge.setStyleSheet(
+            f"QPushButton {{ background: {bg}; color: #ffffff;"
+            f" border-radius: {ui(9)}px; border: none;"
+            " font-size: 10px; font-weight: 700; }"
+            f"QPushButton:hover {{ background: {bg_hover}; }}"
+        )
+
+    def _sync_custom_title(self) -> None:
+        """状态刷新时同步持久化的自定义名称，但保留用户当前的显示切换状态。
+
+        只有整页刷新（_populate_cards_batch 重建卡片）才通过
+        show_custom_title_by_default() 重置为展示修改后的名称。
+        """
+        self._custom_title = self.mod.custom_title or ""
+        self._refresh_title()
+
+    def show_custom_title_by_default(self) -> None:
+        """整页刷新/重建后默认展示修改后的名称。"""
+        self._show_custom = True
+        self._refresh_title()
+
+    def _on_rename_clicked(self) -> None:
+        original = self.mod.title or self.mod.file_name
+        current = self._custom_title or original
+        name, ok = QInputDialog.getText(
+            self, "修改卡片名称", "自定义名称（留空恢复原始名称）：", text=current
+        )
+        if not ok:
+            return
+        name = name.strip()
+        if not name or name == original:
+            name = ""
+        self._custom_title = name
+        self._show_custom = True
+        self.custom_title_changed.emit(self.mod.id, name)
+        self._refresh_title()
+
+    def _toggle_custom_title(self) -> None:
+        if not self._custom_title:
+            return
+        self._show_custom = not self._show_custom
+        self._refresh_title()
+
+    def _layout_corner_buttons(self) -> None:
+        margin = ui(4)
+        gap = ui(4)
+        self._rename_button.move(
+            self.preview.width() - self._rename_button.width() - margin, margin
+        )
+        # “改”角标紧挨在修改笔按钮的左侧。
+        self._custom_badge.move(
+            self._rename_button.x() - self._custom_badge.width() - gap, margin
+        )
+
+
+class ModCard(CustomTitleMixin, QFrame):
     clicked = pyqtSignal(str)
     context_requested = pyqtSignal(str, object)
     favorite_toggled = pyqtSignal(str)
+    custom_title_changed = pyqtSignal(str, str)  # (mod_id, custom_title)
     BASE_WIDTH = ui(214)
     BASE_HEIGHT = ui(258)
 
@@ -322,10 +433,20 @@ class ModCard(QFrame):
         preview.setObjectName("preview")
         self.preview = preview
         layout.addWidget(preview)
+        # 组合标签：多选组合时叠加在预览图右上角，每个已选组合一个独立彩色圆角小标签。
+        # 标签按预览图可用宽度自动换行、右对齐排列，防止超出卡片范围。
+        self._collection_names: set[str] = set(collection_names or ())
+        self._selected_collection_names: set[str] = set()
+        self._collection_tag_host = QWidget(preview)
+        self._collection_tag_host.setObjectName("collectionTagHost")
+        self._collection_tag_host.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        self._collection_tag_host.setStyleSheet("background: transparent;")
+        self._collection_chips: list[QLabel] = []
+        self._collection_tag_host.hide()
 
-        title = TwoLineElidedLabel(mod.title or mod.file_name)
+        title = TwoLineElidedLabel("")
         title.setObjectName("cardTitle")
-        title.setToolTip(mod.title or mod.file_name)
+        self._setup_custom_title(preview, title)
         # Two Chinese/English title lines need enough line-height to avoid the
         # second line being clipped; metadata then flows beneath the full title.
         # 40px gives two 13px lines comfortable headroom so descenders on the
@@ -373,6 +494,10 @@ class ModCard(QFrame):
             tags.addWidget(make_tag("已启用", "#2d65d6"))
         if mod.conflict_with:
             tags.addWidget(make_tag("冲突", "#ff7070"))
+        if mod.dependencies:
+            dep_tag = make_tag(f"依赖 {len(mod.dependencies)}", "#c9a227")
+            dep_tag.setToolTip("启用此 Mod 时会提示一并启用其依赖")
+            tags.addWidget(dep_tag)
         self._add_source_tag(tags)
         tags.addStretch(1)
         tags.addWidget(star)
@@ -417,6 +542,8 @@ class ModCard(QFrame):
             round(ui(10) * scale), 0,
         )
         self.preview.setFixedSize(max(1, width - round(ui(20) * scale)), round(ui(112) * scale))
+        self._layout_collection_tag()
+        self._layout_corner_buttons()
         self.title_label.setFixedHeight(round(ui(40) * scale))
         self.meta_label.setFixedHeight(round(ui(14) * scale))
         self.type_summary_label.setFixedHeight(round(ui(14) * scale))
@@ -463,6 +590,99 @@ class ModCard(QFrame):
                 f" min-height: {round(ui(20) * scale)}px; max-height: {round(ui(20) * scale)}px; }}"
             )
 
+
+    def set_collection_context(self, collection_names, selected_names) -> None:
+        """Refresh which selected collections this card's Mod belongs to."""
+        self._collection_names = set(collection_names or ())
+        self._selected_collection_names = set(selected_names or ())
+        self._update_collection_tag()
+
+    def _update_collection_tag(self) -> None:
+        host = self._collection_tag_host
+        if host is None:
+            return
+        for chip in self._collection_chips:
+            chip.deleteLater()
+        self._collection_chips = []
+        relevant = sorted(self._selected_collection_names & self._collection_names)
+        # 仅在选择多个组合时叠加标签；未命中任何已选组合则隐藏。
+        if len(self._selected_collection_names) < 2 or not relevant:
+            host.hide()
+            return
+        for name in relevant[:3]:
+            self._collection_chips.append(self._make_collection_chip(name, host))
+        extra = len(relevant) - 3
+        if extra > 0:
+            self._collection_chips.append(self._make_collection_chip(f"+{extra}", host, accent=True))
+        self._layout_collection_tag()
+        host.show()
+        host.raise_()
+
+    def _layout_collection_tag(self) -> None:
+        """按预览图宽度流式换行并右对齐组合标签，超长文本省略号截断。"""
+        host = self._collection_tag_host
+        if host is None:
+            return
+        margin = ui(6)
+        spacing = ui(4)
+        max_width = max(1, self.preview.width() - 2 * margin)
+        rows: list[list[QLabel]] = []
+        row: list[QLabel] = []
+        row_width = 0
+        for chip in self._collection_chips:
+            full = chip.property("fullText") or chip.text()
+            chip.setText(full)
+            chip.adjustSize()
+            if chip.width() > max_width:
+                chip.setText(chip.fontMetrics().elidedText(full, Qt.ElideRight, max_width))
+                chip.adjustSize()
+            if row and row_width + chip.width() > max_width:
+                rows.append(row)
+                row = []
+                row_width = 0
+            row.append(chip)
+            row_width += chip.width() + spacing
+        if row:
+            rows.append(row)
+        y = 0
+        for chips_row in rows:
+            width = sum(c.width() for c in chips_row) + spacing * (len(chips_row) - 1)
+            x = max_width - width  # 每行右对齐
+            row_h = 0
+            for chip in chips_row:
+                chip.move(x, y)
+                x += chip.width() + spacing
+                row_h = max(row_h, chip.height())
+            y += row_h + spacing
+        host.resize(max_width, max(0, y - spacing))
+        host.move(margin, margin + self._rename_button.height() + spacing)
+
+    def _make_collection_chip(self, name: str, parent: QWidget, accent: bool = False) -> QLabel:
+        chip = QLabel(name, parent)
+        chip.setObjectName("collectionChip")
+        chip.setProperty("fullText", name)
+        chip.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        # 每个组合用其名称的稳定哈希派生一种专属颜色；超出展示上限的
+        # 计数角标（+N）使用中性灰色，避免颜色过多造成视觉噪音。
+        if accent:
+            color = "hsla(220, 15%, 32%, 0.92)"
+        else:
+            color = self._collection_chip_color(name)
+        chip.setStyleSheet(
+            f"background: {color}; color: #ffffff;"
+            f" border-radius: {ui(8)}px;"
+            f" min-height: {ui(16)}px; max-height: {ui(16)}px;"
+            " padding: 0 6px; font-size: 9px; font-weight: 700;"
+        )
+        return chip
+
+    @staticmethod
+    def _collection_chip_color(name: str) -> str:
+        """稳定的组合专属色：同一名称在任何会话、任何主题下颜色一致。"""
+        h = 0
+        for byte in name.encode("utf-8"):
+            h = (h * 31 + byte) & 0xFFFFFFFF
+        return f"hsla({h % 360}, 72%, 45%, 0.92)"
 
     def _build_favorite_star(self) -> QPushButton:
         star = QPushButton("★")
@@ -517,6 +737,9 @@ class ModCard(QFrame):
         self.setObjectName(
             "modCardConflict" if self.mod.active and self.mod.conflict_with else ("modCardActive" if self.mod.active else "modCard")
         )
+        if getattr(self.preview, "_image_path_key", None) != (self.mod.image_path or ""):
+            self.preview.refresh_image(self.mod)
+        self._sync_custom_title()
         # Remove the dynamic tag widgets but never delete the persistent
         # favorite star: it is re-added below and a queued deleteLater on it
         # would free a widget still referenced by the layout (use-after-free
@@ -535,6 +758,10 @@ class ModCard(QFrame):
             self.tags_layout.addWidget(make_tag("已启用", "#2d65d6"))
         if self.mod.conflict_with:
             self.tags_layout.addWidget(make_tag("冲突", "#ff7070"))
+        if self.mod.dependencies:
+            dep_tag = make_tag(f"依赖 {len(self.mod.dependencies)}", "#c9a227")
+            dep_tag.setToolTip("启用此 Mod 时会提示一并启用其依赖")
+            self.tags_layout.addWidget(dep_tag)
         self._add_source_tag(self.tags_layout)
         self.tags_layout.addStretch(1)
         if self.favorite_star.parent() is not self.tags_layout:
@@ -573,9 +800,17 @@ class HoverPreview(QLabel):
         self._hover_timer.setInterval(600)
         self._hover_timer.timeout.connect(self._show_large_preview)
         self.setAlignment(Qt.AlignCenter)
-        self.setFixedHeight(height)
+        self.setFixedSize(width, height)
         self.setScaledContents(False)
+        self._image_path_key = mod.image_path or ""
         self._scaled: QPixmap | None = make_preview_pixmap(mod, width, height)
+        self._refresh_preview_pixmap()
+
+    def refresh_image(self, mod: Mod) -> None:
+        """卡片复用/图片变化时按最新 Mod 重新生成预览图。"""
+        self.mod = mod
+        self._image_path_key = mod.image_path or ""
+        self._scaled = make_preview_pixmap(mod, self.base_width, self.base_height)
         self._refresh_preview_pixmap()
 
     def resizeEvent(self, event) -> None:
@@ -821,28 +1056,41 @@ class LegacyConflictCard(QFrame):
             peer_row.addWidget(peer)
         peer_row.addStretch(1)
         layout.addLayout(peer_row)
-class ConflictCard(QFrame):
-    """Compact conflict item. Double-clicking it disables the represented Mod."""
+class ConflictCard(CustomTitleMixin, QFrame):
+    """Compact conflict item. Single-clicking pins the Mod to the top of its
+    conflict group (higher priority in addonlist.txt); double-clicking
+    disables the represented Mod."""
     disable_requested = pyqtSignal(str)
+    pin_requested = pyqtSignal(str)
+    context_requested = pyqtSignal(str, object)
+    custom_title_changed = pyqtSignal(str, str)
 
     def __init__(self, mod: Mod, width: int | None = None):
         super().__init__()
         self.mod = mod
         card_width = width or ui(208)
-        self.setObjectName("conflictCard")
+        pinned = mod.conflict_pin > 0
+        self.setObjectName("conflictCardPinned" if pinned else "conflictCard")
         self.setCursor(Qt.PointingHandCursor)
         self.setFixedSize(card_width, ui(250))
         self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        # 单击（置顶）与双击（禁用）通过定时器区分：先延迟派发单击，
+        # 双击发生时取消，避免双击禁用前先触发一次置顶。
+        self._pin_timer = QTimer(self)
+        self._pin_timer.setSingleShot(True)
+        self._pin_timer.timeout.connect(self._emit_pin_request)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(ui(10), ui(10), ui(10), ui(10))
         layout.setSpacing(ui(5))
         preview = HoverPreview(mod, card_width - ui(20), ui(78), self)
         preview.setObjectName("conflictPreview")
+        self.preview = preview
         layout.addWidget(preview)
-        title = TwoLineElidedLabel(mod.title or mod.file_name)
+        title = TwoLineElidedLabel("")
         title.setObjectName("cardTitle")
-        title.setToolTip(mod.title or mod.file_name)
-        title.setFixedHeight(ui(32))
+        # 13px 两行文字（含 1.32 行高）约需 34px，40px 保证第二行不被裁切。
+        title.setFixedHeight(ui(40))
+        self._setup_custom_title(preview, title)
         title_row = QHBoxLayout()
         title_row.setContentsMargins(0, 0, 0, 0)
         title_row.setSpacing(ui(6))
@@ -866,11 +1114,16 @@ class ConflictCard(QFrame):
         tags = QHBoxLayout()
         tags.setSpacing(ui(5))
         tags.addWidget(make_tag("冲突", "#b84752"))
+        if pinned:
+            pin_tag = make_tag("置顶", "#c9a227")
+            pin_tag.setToolTip("该 Mod 已置顶：冲突组内排在最前，addonlist.txt 中优先被游戏读取")
+            tags.addWidget(pin_tag)
         tags.addWidget(make_tag_button("STEAM" if mod.steam_loaded and mod.workshop_id else "本地", "#365f9f" if mod.steam_loaded and mod.workshop_id else "#526073", "打开来源", self.open_source))
         tags.addStretch(1)
         layout.addLayout(tags)
-        hint = QLabel("双击卡片即可禁用")
+        hint = QLabel("单击置顶优先 · 双击禁用")
         hint.setObjectName("conflictCaption")
+        hint.setToolTip("单击：将该 Mod 置顶为冲突组首位（addonlist.txt 中优先加载）；双击：禁用该 Mod")
         layout.addWidget(hint)
 
     def open_source(self) -> None:
@@ -881,12 +1134,37 @@ class ConflictCard(QFrame):
             if folder.exists():
                 QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
 
+    def _emit_pin_request(self) -> None:
+        self.pin_requested.emit(self.mod.id)
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.LeftButton:
+            # 单击与双击共用第一次按下：延迟到双击判定窗口结束后再置顶，
+            # 避免双击禁用前先误触发置顶。
+            self._pin_timer.start(QApplication.doubleClickInterval())
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
     def mouseDoubleClickEvent(self, event) -> None:
+        self._pin_timer.stop()
         if event.button() == Qt.LeftButton:
             self.disable_requested.emit(self.mod.id)
             event.accept()
             return
         super().mouseDoubleClickEvent(event)
+
+    def contextMenuEvent(self, event) -> None:
+        self._pin_timer.stop()
+        self.context_requested.emit(self.mod.id, event.globalPos())
+        event.accept()
+def conflict_group_sort_key(mod: Mod):
+    """冲突组内排序键：置顶的 Mod（conflict_pin 值越大越新）排在最前，
+    其余按冲突数从多到少、名称排序。冲突报告与 addonlist.txt 共用，
+    保证两者顺序一致（置顶 Mod 在文件中同样靠前，被游戏优先读取）。"""
+    return (-mod.conflict_pin, -len(mod.conflict_with), mod.title.casefold())
+
+
 class ConflictDialog(QDialog):
     disable_requested = pyqtSignal(str)
 
@@ -907,12 +1185,7 @@ class ConflictDialog(QDialog):
                     if peer in remaining:
                         remaining.remove(peer)
                         pending.append(peer)
-            groups.append(
-                sorted(
-                    (mods[mod_id] for mod_id in component),
-                    key=lambda mod: (-len(mod.conflict_with), mod.title.casefold()),
-                )
-            )
+            groups.append(sorted((mods[mod_id] for mod_id in component), key=conflict_group_sort_key))
         return sorted(
             groups,
             key=lambda group: (
@@ -1014,7 +1287,7 @@ class ConflictDialog(QDialog):
         cards_grid.setHorizontalSpacing(ui(12))
         cards_grid.setVerticalSpacing(ui(12))
         cards_grid.setAlignment(Qt.AlignLeft | Qt.AlignTop)
-        for index, mod in enumerate(sorted(group, key=lambda item: (-len(item.conflict_with), item.title.lower()))):
+        for index, mod in enumerate(sorted(group, key=conflict_group_sort_key)):
             card = ConflictCard(mod)
             card.disable_requested.connect(self.disable_requested)
             cards_grid.addWidget(card, index // 4, index % 4)
@@ -1639,3 +1912,231 @@ def clear_layout(layout) -> None:
         item = layout.takeAt(0)
         if item.widget() is not None:
             item.widget().deleteLater()
+class DependencyDialog(QDialog):
+    """Frameless dialog to edit one Mod's dependency records.
+
+    Users can check local Mods as dependencies, register Workshop ids that are
+    not installed yet (they resolve once that Mod is downloaded and scanned),
+    or auto-detect candidates from the Mod's Steam description links.
+    """
+
+    def __init__(self, mod: Mod, mods: dict[str, Mod], parent=None):
+        super().__init__(parent)
+        self.mod = mod
+        self.mods = mods
+        self._missing_ids: list[str] = [dep for dep in mod.dependencies if dep not in mods]
+        self._dep_ids: set[str] = {dep for dep in mod.dependencies if dep in mods}
+        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.setModal(True)
+        self.resize(ui(600), ui(540))
+        self.setMinimumSize(ui(500), ui(440))
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        header = DragHeader(self)
+        header.setObjectName("dialogHeader")
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(ui(18), ui(10), ui(12), ui(10))
+        header_title = QLabel("管理依赖")
+        header_title.setObjectName("dialogTitle")
+        header_layout.addWidget(header_title)
+        header_layout.addStretch(1)
+        close = QPushButton("×")
+        close.setObjectName("closeButton")
+        close.setToolTip("关闭")
+        close.clicked.connect(self.reject)
+        header_layout.addWidget(close)
+        root.addWidget(header)
+
+        content = QWidget()
+        content.setObjectName("aboutContent")
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(ui(18), ui(14), ui(18), ui(14))
+        content_layout.setSpacing(ui(10))
+
+        hint = QLabel(f"为「{mod.title or mod.file_name}」设置依赖关系。启用该 Mod 时，应用会提示一并启用已安装的依赖；未安装的依赖（Workshop 编号）在下载并扫描后会自行生效。")
+        hint.setObjectName("aboutDescription")
+        hint.setWordWrap(True)
+        content_layout.addWidget(hint)
+
+        self.tree = QTreeWidget()
+        self.tree.setHeaderHidden(True)
+        self.tree.setUniformRowHeights(True)
+        self.tree.itemChanged.connect(self._on_item_changed)
+        content_layout.addWidget(self.tree, 1)
+
+        actions = QHBoxLayout()
+        actions.setSpacing(ui(8))
+        detect = QPushButton("从简介识别依赖")
+        detect.setObjectName("promptSecondaryButton")
+        detect.setToolTip("扫描该 Mod 的 Steam 简介，把其中的创意工坊链接识别为依赖候选")
+        detect.clicked.connect(self._detect_from_description)
+        actions.addWidget(detect)
+        add_id = QPushButton("按 ID 添加缺失依赖")
+        add_id.setObjectName("promptSecondaryButton")
+        add_id.setToolTip("输入尚未安装的依赖 Mod 的 Workshop 编号或页面链接")
+        add_id.clicked.connect(self._add_missing_id)
+        actions.addWidget(add_id)
+        actions.addStretch(1)
+        cancel = QPushButton("取消")
+        cancel.setObjectName("promptSecondaryButton")
+        cancel.clicked.connect(self.reject)
+        actions.addWidget(cancel)
+        ok = QPushButton("确定")
+        ok.setObjectName("promptPrimaryButton")
+        ok.clicked.connect(self.accept)
+        actions.addWidget(ok)
+        content_layout.addLayout(actions)
+        root.addWidget(content, 1)
+
+        self._rebuild_tree()
+
+    def _rebuild_tree(self) -> None:
+        """Rebuild the picker tree from the current dependency selection."""
+        self.tree.blockSignals(True)
+        self.tree.clear()
+        local_mods = [mod for mod in self.mods.values() if mod.id != self.mod.id]
+        selected = [mod for mod in local_mods if mod.id in self._dep_ids]
+        selected.sort(key=lambda mod: (mod.title or mod.file_name).casefold())
+        available = [mod for mod in local_mods if mod.id not in self._dep_ids]
+        available.sort(key=lambda mod: (mod.title or mod.file_name).casefold())
+
+        dep_group = QTreeWidgetItem([f"依赖的 Mod（已勾选 {len(selected)} 个）"])
+        dep_group.setFlags(dep_group.flags() & ~Qt.ItemIsSelectable)
+        self.tree.addTopLevelItem(dep_group)
+        for mod in selected:
+            item = self._make_check_item(mod, True)
+            dep_group.addChild(item)
+
+        local_group = QTreeWidgetItem([f"本地可用 Mod（{len(available)} 个）"])
+        local_group.setFlags(local_group.flags() & ~Qt.ItemIsSelectable)
+        self.tree.addTopLevelItem(local_group)
+        for mod in available:
+            item = self._make_check_item(mod, False)
+            local_group.addChild(item)
+
+        missing_group = QTreeWidgetItem([f"缺失依赖 · 未安装（{len(self._missing_ids)} 个）"])
+        missing_group.setFlags(missing_group.flags() & ~Qt.ItemIsSelectable)
+        self.tree.addTopLevelItem(missing_group)
+        for dep_id in self._missing_ids:
+            row = QTreeWidgetItem([f"Workshop {dep_id}"])
+            row.setFlags(row.flags() & ~Qt.ItemIsUserCheckable)
+            row.setToolTip(0, f"Workshop 编号 {dep_id}：下载并安装后会自动生效")
+            missing_group.addChild(row)
+            remove = QPushButton("×")
+            remove.setObjectName("tagButton")
+            remove.setToolTip("移除该缺失依赖")
+            remove.setFixedSize(ui(22), ui(20))
+            remove.clicked.connect(lambda _=False, mid=dep_id: self._remove_missing(mid))
+            self.tree.setItemWidget(row, 0, remove)
+
+        self.tree.expandAll()
+        self.tree.blockSignals(False)
+
+    def _make_check_item(self, mod: Mod, checked: bool) -> QTreeWidgetItem:
+        code = mod.workshop_id or Path(mod.file_name).stem
+        item = QTreeWidgetItem([f"{mod.title or mod.file_name}　{code}"])
+        item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+        item.setCheckState(0, Qt.Checked if checked else Qt.Unchecked)
+        item.setData(0, Qt.UserRole, mod.id)
+        item.setToolTip(0, mod.file_name)
+        return item
+
+    def _on_item_changed(self, item: QTreeWidgetItem, _column: int) -> None:
+        mod_id = item.data(0, Qt.UserRole)
+        if not mod_id:
+            return
+        if item.checkState(0) == Qt.Checked:
+            self._dep_ids.add(mod_id)
+        else:
+            self._dep_ids.discard(mod_id)
+        self._refresh_group_counts()
+
+    def _refresh_group_counts(self) -> None:
+        """Keep the picker group headers in sync with the live check states."""
+        if self.tree.topLevelItemCount() < 2:
+            return
+        dep_group = self.tree.topLevelItem(0)
+        local_group = self.tree.topLevelItem(1)
+        dep_checked = sum(
+            1 for index in range(dep_group.childCount())
+            if dep_group.child(index).checkState(0) == Qt.Checked
+        )
+        local_checked = sum(
+            1 for index in range(local_group.childCount())
+            if local_group.child(index).checkState(0) == Qt.Checked
+        )
+        dep_group.setText(0, f"依赖的 Mod（已勾选 {dep_checked + local_checked} 个）")
+
+    def _detect_from_description(self) -> None:
+        """Auto-detect dependencies from Workshop links in the Steam description."""
+        found = extract_workshop_ids(self.mod.description)
+        added_local = 0
+        added_missing = 0
+        for dep_id in found:
+            if dep_id == self.mod.id:
+                continue
+            if dep_id in self.mods:
+                if dep_id not in self._dep_ids:
+                    self._dep_ids.add(dep_id)
+                    added_local += 1
+            elif dep_id not in self._missing_ids:
+                self._missing_ids.append(dep_id)
+                added_missing += 1
+        self._rebuild_tree()
+        if not found:
+            QMessageBox.information(self, "未识别到依赖", "该 Mod 的 Steam 简介中没有找到创意工坊链接。")
+        elif added_local or added_missing:
+            QMessageBox.information(self, "识别完成", f"从简介中识别到 {len(found)} 个链接：{added_local} 个本地 Mod 已勾选，{added_missing} 个缺失依赖已加入。")
+
+    def _add_missing_id(self) -> None:
+        text, ok = QInputDialog.getText(self, "添加缺失依赖", "输入依赖 Mod 的 Workshop 编号或页面链接：")
+        if not ok or not text.strip():
+            return
+        ids = extract_workshop_ids(text) or ([re.sub(r"\D", "", text.strip())] if re.fullmatch(r"\d{5,}", text.strip()) else [])
+        added = 0
+        for dep_id in ids:
+            if not dep_id:
+                continue
+            if dep_id == self.mod.id:
+                continue
+            if dep_id in self.mods:
+                if dep_id not in self._dep_ids:
+                    self._dep_ids.add(dep_id)
+                    added += 1
+            elif dep_id not in self._missing_ids:
+                self._missing_ids.append(dep_id)
+                added += 1
+        self._rebuild_tree()
+        if not ids:
+            QMessageBox.warning(self, "无法识别", "未能从输入中识别出 Workshop 编号，请输入形如 id=123456789 的链接或纯数字编号。")
+        elif added:
+            QMessageBox.information(self, "已添加", f"已添加 {added} 个依赖。")
+
+    def _remove_missing(self, dep_id: str) -> None:
+        if dep_id in self._missing_ids:
+            self._missing_ids.remove(dep_id)
+        self._rebuild_tree()
+
+    def dependency_ids(self) -> list[str]:
+        """Final dependency list: previous order preserved, then additions, then missing."""
+        ordered: list[str] = []
+        seen: set[str] = set()
+        for dep in self.mod.dependencies:
+            if (dep in self._dep_ids or dep in self._missing_ids) and dep not in seen:
+                seen.add(dep)
+                ordered.append(dep)
+        candidates = sorted(self._dep_ids, key=lambda mid: (self.mods[mid].title or self.mods[mid].file_name).casefold())
+        for dep in candidates:
+            if dep not in seen:
+                seen.add(dep)
+                ordered.append(dep)
+        for dep in self._missing_ids:
+            if dep not in seen:
+                seen.add(dep)
+                ordered.append(dep)
+        return ordered
+

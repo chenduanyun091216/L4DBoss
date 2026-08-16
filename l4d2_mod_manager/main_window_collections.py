@@ -52,6 +52,9 @@ def add_mod_to_collection(self, mod_id: str, collection_name: str) -> None:
                 collection.mod_ids.append(mod_id)
             self.storage.save_collections(self.collections)
             self.sync_collection_in_background(collection)
+            card = self._card_widgets.get(mod_id) or self._card_cache.get(mod_id)
+            if card is not None:
+                card.set_collection_context(self.collection_names_for(mod_id), self._selected_collection_names)
             return
 
 
@@ -75,6 +78,8 @@ def filtered_mods(self) -> list[Mod]:
         mods = [mod for mod in mods if mod.active]
     if self._favorite_only_filter:
         mods = [mod for mod in mods if mod.favorite]
+    if self._custom_title_only_filter:
+        mods = [mod for mod in mods if mod.custom_title]
     if self.current_category != "all":
         if self.category_mode == "simple":
             mods = [
@@ -85,18 +90,18 @@ def filtered_mods(self) -> list[Mod]:
             mods = [mod for mod in mods if self.current_category in mod.categories]
     query = self.search_input.text().strip().lower() if hasattr(self, "search_input") else ""
     if query:
-        mods = [mod for mod in mods if query in " ".join([mod.title, mod.author, mod.file_name, mod.workshop_id or ""]).lower()]
+        mods = [mod for mod in mods if query in " ".join([mod.custom_title, mod.title, mod.author, mod.file_name, mod.workshop_id or ""]).lower()]
     for mod in mods:
         if mod.id not in self._mod_sort_cache:
             try:
                 self._mod_sort_cache[mod.id] = Path(mod.file_path).stat().st_mtime_ns
             except OSError:
                 self._mod_sort_cache[mod.id] = 0
+    # 收藏不再置顶：所有卡片统一按“通用排序”（本地修改时间倒序 + 名称兜底）。
     return sorted(
         mods,
         key=lambda mod: (
-            mod.favorite,
-            mod.favorite_at if mod.favorite else self._mod_sort_cache.get(mod.id, 0),
+            self._mod_sort_cache.get(mod.id, 0),
             mod.title.casefold(),
         ),
         reverse=True,
@@ -395,6 +400,15 @@ def write_addonlist(self) -> bool:
         return False
     addon_root = addon_dirs[0].resolve()
     addonlist_path = addon_root.parent / "addonlist.txt"
+    # 冲突组内顺序遵循冲突报告中的置顶顺序：置顶的 Mod 位于组内最前。
+    # 游戏加载 addonlist.txt 时优先读取靠前的条目，冲突时由置顶 Mod 生效。
+    groups = ConflictDialog._conflict_groups(self.mods)
+    group_order: dict[str, tuple[int, int]] = {
+        mod.id: (group_index, within_index)
+        for group_index, group in enumerate(groups)
+        for within_index, mod in enumerate(group)
+    }
+    rel_to_mod: dict[str, str] = {}
     entries: list[tuple[str, bool]] = []
     for mod in self.mods.values():
         file_path = Path(mod.file_path)
@@ -402,9 +416,19 @@ def write_addonlist(self) -> bool:
             relative_path = file_path.resolve().relative_to(addon_root)
         except ValueError:
             continue
-        entries.append((str(relative_path).replace("/", "\\"), mod.active))
+        relative = str(relative_path).replace("/", "\\")
+        rel_to_mod[relative] = mod.id
+        entries.append((relative, mod.active))
+
+    def sort_key(item: tuple[str, bool]):
+        relative, _active = item
+        order = group_order.get(rel_to_mod.get(relative, ""))
+        if order is not None:
+            return (0, order[0], order[1], relative.casefold())
+        return (1, 0, 0, relative.casefold())
+
     lines = ['"AddonList"\n', "{\n"]
-    for relative_path, active in sorted(entries, key=lambda item: item[0].casefold()):
+    for relative_path, active in sorted(entries, key=sort_key):
         lines.append(f'\t"{relative_path}"\t\t"{"1" if active else "0"}"\n')
     lines.append("}\n")
     try:

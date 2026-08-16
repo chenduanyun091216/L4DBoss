@@ -275,11 +275,14 @@ def _populate_cards_batch(
             card.clicked.connect(self.toggle_mod)
             card.context_requested.connect(self.show_card_context_menu)
             card.favorite_toggled.connect(self.toggle_favorite)
+            card.custom_title_changed.connect(self.on_card_custom_title_changed)
             self._card_cache[mod.id] = card
         else:
             card.mod = mod
             card.refresh_state()
+            card.show_custom_title_by_default()
             card.set_card_width(card_width)
+        card.set_collection_context(self.collection_names_for(mod.id), self._selected_collection_names)
         self._card_widgets[mod.id] = card
         self.cards_layout.addWidget(card, index // columns, index % columns, Qt.AlignTop)
         # Reparent through the layout first; showing it earlier would make
@@ -299,6 +302,15 @@ def _populate_cards_batch(
     for column in range(columns):
         self.cards_layout.setColumnMinimumWidth(column, 0)
     self._sync_content_right_edges()
+
+
+def on_card_custom_title_changed(self, mod_id: str, custom_title: str) -> None:
+    """Persist a card's custom name; empty string restores the original."""
+    mod = self.mods.get(mod_id)
+    if mod is None:
+        return
+    mod.custom_title = custom_title
+    self.storage.save_mods(self.mods)
 
 
 def _update_pagination(self, total: int, total_pages: int) -> None:
@@ -626,7 +638,9 @@ def _set_status_selection(self, selected_button: QPushButton) -> None:
 def _update_mod_filter_title(self) -> None:
     if self._content_mode != "mods" or self.current_category != "all":
         return
-    if self._favorite_only_filter:
+    if self._custom_title_only_filter:
+        self.content_title.setText("改名的 Mod")
+    elif self._favorite_only_filter:
         self.content_title.setText("收藏 Mod")
     else:
         self.content_title.setText("已激活 Mod" if self._active_only_filter else "全部 Mod")

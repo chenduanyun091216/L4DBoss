@@ -69,6 +69,9 @@ THEME_PALETTE: dict[str, dict[str, str]] = {
         "surface": "#0a0e16",
         "panel": "#121826",
         "panel_border": "#5f83b5",
+        "menu_text": "#dfe9f8",
+        "badge_original": "#55637a",
+        "badge_original_hover": "#68768d",
         "tree_default": "#687384",
         "tree_favorite": "#f5b301",
         "tree_expand": "#9fb2ce",
@@ -83,6 +86,9 @@ THEME_PALETTE: dict[str, dict[str, str]] = {
         "surface": "#d9e2f1",
         "panel": "#f4f8fd",
         "panel_border": "#7fa6e2",
+        "menu_text": "#22334e",
+        "badge_original": "#4e5a6c",
+        "badge_original_hover": "#5f6b7d",
         "tree_default": "#8a94a6",
         "tree_favorite": "#c98a00",
         "tree_expand": "#5a6a82",
@@ -97,6 +103,9 @@ THEME_PALETTE: dict[str, dict[str, str]] = {
         "surface": "#9a9ea4",
         "panel": "#adb1b7",
         "panel_border": "#6d7278",
+        "menu_text": "#e3eaf4",
+        "badge_original": "#545c67",
+        "badge_original_hover": "#656d78",
         "tree_default": "#3a4149",
         "tree_favorite": "#c98a00",
         "tree_expand": "#4a5058",
@@ -248,6 +257,9 @@ THEMES = {
     #searchBox #favoriteFilterButton { background: transparent; border: 0; color: #6c7c93; font-size: 16px; font-weight: 700; padding: 0; }
     #searchBox #favoriteFilterButton:hover { color: #ffc83d; }
     #searchBox #favoriteFilterButton:checked { color: #f5b301; }
+    #searchBox #customTitleFilterButton { background: transparent; border: 1px solid #6c7c93; border-radius: 6px; color: #6c7c93; font-size: 8px; font-weight: 700; padding: 0; }
+    #searchBox #customTitleFilterButton:hover { border-color: #ff6f7d; color: #ff6f7d; }
+    #searchBox #customTitleFilterButton:checked { border-color: #e0393e; color: #e0393e; }
     #emptyText { color: #9db2d0; background: transparent; border: 0; padding: 0; font-size: 15px; font-weight: 500; line-height: 1.7; letter-spacing: 0.5px; }
     #paginationBar { min-height: 22px; }
     #paginationButton { min-height: 0; max-height: 22px; color: #cbd7e8; background: #253247; border: 1px solid #34445c; border-radius: 5px; padding: 0 6px; font-size: 11px; }
@@ -302,6 +314,8 @@ THEMES = {
     #conflictGroupLabel { color: #e99aa2; font-size: 11px; font-weight: 800; letter-spacing: 1px; }
     #conflictCard { background: #20202b; border: 1px solid #6d404b; border-radius: 10px; }
     #conflictCard:hover { background: #282333; border-color: #b85866; }
+    #conflictCardPinned { background: #20202b; border: 2px solid #d4a017; border-radius: 10px; }
+    #conflictCardPinned:hover { background: #282333; border-color: #ffc83d; }
     #conflictCountBadge { color: #fff4f5; background: #b84752; border: 1px solid #ef7d87; border-radius: 12px; font-size: 11px; font-weight: 800; }
     #conflictPreview { background: #111821; border-radius: 7px; min-height: 104px; max-height: 104px; }
     #conflictCaption { color: #f08b96; font-size: 11px; font-weight: 700; }
@@ -450,6 +464,9 @@ THEMES = {
     #searchBox #favoriteFilterButton { background: transparent; border: 0; color: #b3bccb; font-size: 16px; font-weight: 700; padding: 0; }
     #searchBox #favoriteFilterButton:hover { color: #f5b301; }
     #searchBox #favoriteFilterButton:checked { color: #c98a00; }
+    #searchBox #customTitleFilterButton { background: transparent; border: 1px solid #8a94a6; border-radius: 6px; color: #8a94a6; font-size: 8px; font-weight: 700; padding: 0; }
+    #searchBox #customTitleFilterButton:hover { border-color: #e0393e; color: #e0393e; }
+    #searchBox #customTitleFilterButton:checked { border-color: #e0393e; color: #e0393e; }
     #emptyText { color: #5f718e; background: transparent; border: 0; padding: 0; font-size: 15px; font-weight: 500; line-height: 1.7; letter-spacing: 0.5px; }
     #paginationBar { min-height: 22px; }
     #paginationButton { min-height: 0; max-height: 22px; color: #3c4e6b; background: #e9eef7; border: 1px solid #aab6c8; border-radius: 5px; padding: 0 6px; font-size: 11px; }
@@ -504,6 +521,8 @@ THEMES = {
     #conflictGroupLabel { color: #c24552; font-size: 11px; font-weight: 800; letter-spacing: 1px; }
     #conflictCard { background: #fff5f6; border: 1px solid #e2a9b1; border-radius: 10px; }
     #conflictCard:hover { background: #ffecef; border-color: #ef7a86; }
+    #conflictCardPinned { background: #fff5f6; border: 2px solid #c98a00; border-radius: 10px; }
+    #conflictCardPinned:hover { background: #ffecef; border-color: #f5b301; }
     #conflictCountBadge { color: #fff4f5; background: #b84752; border: 1px solid #ef7d87; border-radius: 12px; font-size: 11px; font-weight: 800; }
     #conflictPreview { background: #eef2f8; border-radius: 7px; min-height: 104px; max-height: 104px; }
     #conflictCaption { color: #c04a56; font-size: 11px; font-weight: 700; }
@@ -654,6 +673,9 @@ THEMES = {
     #searchBox #favoriteFilterButton { background: transparent; border: 0; color: #969da7; font-size: 16px; font-weight: 700; padding: 0; }
     #searchBox #favoriteFilterButton:hover { color: #c5a74e; }
     #searchBox #favoriteFilterButton:checked { color: #a8893f; }
+    #searchBox #customTitleFilterButton { background: transparent; border: 1px solid #969da7; border-radius: 6px; color: #969da7; font-size: 8px; font-weight: 700; padding: 0; }
+    #searchBox #customTitleFilterButton:hover { border-color: #ff6f7d; color: #ff6f7d; }
+    #searchBox #customTitleFilterButton:checked { border-color: #e0393e; color: #e0393e; }
     #emptyText { color: #c2cddb; background: transparent; border: 0; padding: 0; font-size: 15px; font-weight: 500; line-height: 1.7; letter-spacing: 0.5px; }
     #paginationBar { min-height: 22px; }
     #paginationButton { min-height: 0; max-height: 22px; color: #e3eaf4; background: transparent; border: 1px solid #aab1ba; border-radius: 5px; padding: 0 6px; font-size: 11px; }
@@ -708,6 +730,8 @@ THEMES = {
     #conflictGroupLabel { color: #b0404c; font-size: 11px; font-weight: 800; letter-spacing: 1px; }
     #conflictCard { background: rgba(247, 230, 233, 115); border: 1px solid #d99aa2; border-radius: 10px; }
     #conflictCard:hover { background: rgba(251, 238, 240, 135); border-color: #e0757f; }
+    #conflictCardPinned { background: rgba(247, 230, 233, 115); border: 2px solid #c98a00; border-radius: 10px; }
+    #conflictCardPinned:hover { background: rgba(251, 238, 240, 135); border-color: #f5b301; }
     #conflictCountBadge { color: #fff4f5; background: #a53a44; border: 1px solid #e2626c; border-radius: 12px; font-size: 11px; font-weight: 800; }
     #conflictPreview { background: rgba(227, 230, 235, 110); border-radius: 7px; min-height: 104px; max-height: 104px; }
     #conflictCaption { color: #b0404c; font-size: 11px; font-weight: 700; }
