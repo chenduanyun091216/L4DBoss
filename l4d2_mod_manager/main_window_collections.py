@@ -33,6 +33,7 @@ from .collection_sync import (
     sanitize_collection_name,
     sync_collection_files,
 )
+from .custom_mod import CUSTOM_MOD_FILENAME
 from .models import Mod, ModCollection
 from .steam_client import SteamClient
 from .storage import AppStorage
@@ -97,8 +98,9 @@ def filtered_mods(self) -> list[Mod]:
                 self._mod_sort_cache[mod.id] = Path(mod.file_path).stat().st_mtime_ns
             except OSError:
                 self._mod_sort_cache[mod.id] = 0
-    # 收藏不再置顶：所有卡片统一按“通用排序”（本地修改时间倒序 + 名称兜底）。
-    return sorted(
+    # First show user-pinned cards in their addonlist priority order, then keep
+    # the normal library sort for every other card.
+    ordered = sorted(
         mods,
         key=lambda mod: (
             self._mod_sort_cache.get(mod.id, 0),
@@ -106,6 +108,10 @@ def filtered_mods(self) -> list[Mod]:
         ),
         reverse=True,
     )
+    by_id = {mod.id: mod for mod in ordered}
+    pinned_ids = [mod_id for mod_id in self.settings.get("addonlist_pinned_mod_ids", []) if mod_id in by_id]
+    pinned_set = set(pinned_ids)
+    return [by_id[mod_id] for mod_id in pinned_ids] + [mod for mod in ordered if mod.id not in pinned_set]
 
 
 def refresh_collection_combo(self) -> None:
@@ -400,16 +406,11 @@ def write_addonlist(self) -> bool:
         return False
     addon_root = addon_dirs[0].resolve()
     addonlist_path = addon_root.parent / "addonlist.txt"
-    # 冲突组内顺序遵循冲突报告中的置顶顺序：置顶的 Mod 位于组内最前。
-    # 游戏加载 addonlist.txt 时优先读取靠前的条目，冲突时由置顶 Mod 生效。
-    groups = ConflictDialog._conflict_groups(self.mods)
-    group_order: dict[str, tuple[int, int]] = {
-        mod.id: (group_index, within_index)
-        for group_index, group in enumerate(groups)
-        for within_index, mod in enumerate(group)
-    }
-    rel_to_mod: dict[str, str] = {}
-    entries: list[tuple[str, bool]] = []
+    # Keep the game's existing order intact.  Re-sorting every entry makes the
+    # file hard to audit and changes the precedence of unrelated add-ons.
+    known_entries: dict[str, tuple[str, bool]] = {}
+    mod_entry_keys: dict[str, str] = {}
+    known_filenames: set[str] = set()
     for mod in self.mods.values():
         file_path = Path(mod.file_path)
         try:
@@ -417,18 +418,68 @@ def write_addonlist(self) -> bool:
         except ValueError:
             continue
         relative = str(relative_path).replace("/", "\\")
-        rel_to_mod[relative] = mod.id
-        entries.append((relative, mod.active))
+        known_entries[relative.casefold()] = (relative, mod.active)
+        mod_entry_keys[mod.id] = relative.casefold()
+        known_filenames.add(Path(relative).name.casefold())
 
-    def sort_key(item: tuple[str, bool]):
-        relative, _active = item
-        order = group_order.get(rel_to_mod.get(relative, ""))
-        if order is not None:
-            return (0, order[0], order[1], relative.casefold())
-        return (1, 0, 0, relative.casefold())
+    custom_filename = self.settings.get("custom_mod_filename", CUSTOM_MOD_FILENAME)
+    custom_relative = custom_filename.replace("/", "\\")
+    entries: list[tuple[str, bool]] = []
+    seen: set[str] = set()
+    if addonlist_path.exists():
+        try:
+            existing = addonlist_path.read_text(encoding="utf-8-sig", errors="ignore")
+        except OSError:
+            existing = ""
+        for relative, enabled in re.findall(r'"([^"\r\n]+\.vpk)"\s+"([01])"', existing, flags=re.I):
+            key = relative.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            current = known_entries.get(key)
+            # A Mod can exist both in addons/ and addons/workshop/. The scanner
+            # deliberately selects one physical file; never preserve the other
+            # stale path, otherwise its old "1" state silently re-enables it.
+            if current is None and Path(relative.replace("\\", "/")).name.casefold() in known_filenames:
+                continue
+            entries.append(current if current is not None else (relative, enabled == "1"))
+
+    # New files not present in the old list are appended without disturbing it.
+    for key, entry in known_entries.items():
+        if key not in seen:
+            entries.append(entry)
+            seen.add(key)
+
+    # Do not force the custom Mod to the top. Its precedence is managed by the
+    # existing conflict pin action, just like every other Mod.
+    if (addon_root / custom_filename).exists() and custom_relative.casefold() not in seen:
+        # A generated custom VPK may exist before the next scan adds it to
+        # self.mods. Presence on disk is never permission to enable it.
+        custom_mod = next(
+            (mod for mod in self.mods.values()
+             if Path(mod.file_path).name.casefold() == custom_filename.casefold()),
+            None,
+        )
+        entries.append((custom_filename, bool(custom_mod and custom_mod.active)))
+
+    # User-pinned cards always occupy the first entries. Newer pins come first;
+    # every non-pinned entry keeps its original relative order.
+    pinned_ids = [mod_id for mod_id in self.settings.get("addonlist_pinned_mod_ids", []) if mod_id in self.mods]
+    pinned_keys = [mod_entry_keys[mod_id] for mod_id in pinned_ids if mod_id in mod_entry_keys]
+    pinned_set = set(pinned_keys)
+    entry_by_key = {path.casefold(): (path, active) for path, active in entries}
+    # Pinning changes only placement. Always recover the activation bit from
+    # the corresponding Mod rather than from an older addonlist entry.
+    ordered_entries = [
+        (entry_by_key[mod_entry_keys[mod_id]][0], bool(self.mods[mod_id].active))
+        for mod_id in pinned_ids
+        if mod_id in mod_entry_keys and mod_entry_keys[mod_id] in entry_by_key
+    ]
+    ordered_entries.extend(entry for entry in entries if entry[0].casefold() not in pinned_set)
+    entries = ordered_entries
 
     lines = ['"AddonList"\n', "{\n"]
-    for relative_path, active in sorted(entries, key=sort_key):
+    for relative_path, active in entries:
         lines.append(f'\t"{relative_path}"\t\t"{"1" if active else "0"}"\n')
     lines.append("}\n")
     try:
@@ -438,4 +489,66 @@ def write_addonlist(self) -> bool:
         QMessageBox.critical(self, "写入失败", f"无法写入 addonlist.txt：{exc}")
         return False
     return True
+
+
+def pin_mod_to_addonlist(self, mod_id: str) -> None:
+    """Pin a card and move all pinned cards to the front of addonlist.txt."""
+    mod = self.mods.get(mod_id)
+    if mod is None:
+        return
+    pinned_ids = [item for item in self.settings.get("addonlist_pinned_mod_ids", []) if item in self.mods and item != mod_id]
+    pinned_ids.insert(0, mod_id)
+    self.settings["addonlist_pinned_mod_ids"] = pinned_ids
+    self.storage.save_settings(self.settings)
+    if not self.write_addonlist():
+        return
+    self.refresh_addonlist_pinned_state()
+    self._after_pin_change(mod_id, pinned=True)
+
+
+def unpin_mod_from_addonlist(self, mod_id: str) -> None:
+    pinned_ids = list(self.settings.get("addonlist_pinned_mod_ids", []))
+    if mod_id not in pinned_ids:
+        return
+    self.settings["addonlist_pinned_mod_ids"] = [item for item in pinned_ids if item != mod_id]
+    self.storage.save_settings(self.settings)
+    if not self.write_addonlist():
+        return
+    self.refresh_addonlist_pinned_state()
+    self._after_pin_change(mod_id, pinned=False)
+
+
+def _after_pin_change(self, mod_id: str, *, pinned: bool) -> None:
+    """Refresh whichever view currently shows the cards and surface feedback."""
+    mod = self.mods.get(mod_id)
+    title = mod.title if mod else "该 Mod"
+    if self._content_mode == "mods":
+        self.current_page = 0
+        self.refresh_cards()
+        self.show_pin_status(f"{'已置顶' if pinned else '已取消置顶'}「{title}」")
+    elif self._content_mode == "detail" and hasattr(self, "_conflict_report_context"):
+        # Rebuilding individual sections while their child cards are still
+        # owned by the report can make Qt delete/reparent widgets during the
+        # context-menu event.  Recreate the report on the next event-loop turn
+        # so the menu and its native popup have fully unwound first.
+        QTimer.singleShot(0, self.show_conflicts)
+        self._show_conflict_toast(f"{'已置顶' if pinned else '已取消置顶'}「{title}」")
+        self.show_pin_status(f"{'已置顶' if pinned else '已取消置顶'}「{title}」")
+    else:
+        self.show_pin_status(f"{'已置顶' if pinned else '已取消置顶'}「{title}」")
+
+
+def show_pin_status(self, message: str) -> None:
+    """Show a brief pin/unpin confirmation to the left of the 选择游戏 button."""
+    self.pin_status_label.setText(message)
+    self.pin_status_widget.show()
+    self._position_header_status_widgets()
+    self._pin_status_timer.start(1800)
+
+
+def refresh_addonlist_pinned_state(self) -> None:
+    """Reflect the persistent multi-card pin selection in card overlays."""
+    pinned_ids = set(self.settings.get("addonlist_pinned_mod_ids", []))
+    for mod in self.mods.values():
+        mod.addonlist_pinned = mod.id in pinned_ids
 

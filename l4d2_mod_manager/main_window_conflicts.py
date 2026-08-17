@@ -68,8 +68,11 @@ def _build_conflict_report(self, host: QWidget) -> None:
     layout.setSpacing(ui(14))
     available_width = self.scroll.viewport().width() - ui(48)
     spacing = ui(15)
-    columns = min(7, max(1, (available_width + spacing) // (ui(190) + spacing)))
-    card_width = max(ui(160), (available_width - spacing * (columns - 1)) // columns)
+    # Use the same calculated card width as the normal library view. The
+    # report may wrap at a different column count because of its margins, but
+    # individual cards always remain visually identical in size.
+    card_width = self.card_width(self.card_columns())
+    columns = max(1, (available_width + spacing) // (card_width + spacing))
     groups = ConflictDialog._conflict_groups(self.mods)
     conflict_names = {
         "rifle_ak47": "AK-47", "rifle_m16": "M16", "rifle_desert": "SCAR", "rifle_sg552": "SG552",
@@ -124,9 +127,14 @@ def _build_conflict_group_section(
         common_categories.intersection_update(mod.categories)
     targets = [conflict_names[key] for key in common_categories if key in conflict_names]
     reason = f"均替换 {' / '.join(sorted(targets)[:2])}" if targets else (f"共享 {len(shared_paths)} 个资源文件" if shared_paths else "存在重叠资源文件")
+    heading_row = QHBoxLayout()
+    heading_row.setContentsMargins(0, 0, 0, 0)
+    heading_row.setSpacing(ui(8))
     heading = QLabel(f"冲突组 {number:02d}  ·  {len(group)} 个 Mod")
     heading.setObjectName("mainConflictGroupTitle")
-    section_layout.addWidget(heading)
+    heading_row.addWidget(heading)
+    heading_row.addStretch(1)
+    section_layout.addLayout(heading_row)
     detail = QLabel(f"冲突原因：{reason}")
     detail.setObjectName("mainConflictGroupReason")
     detail.setToolTip("\n".join(sorted(shared_paths)) if shared_paths else reason)
@@ -141,7 +149,6 @@ def _build_conflict_group_section(
     for card_index, mod in enumerate(group):
         card = ConflictCard(mod, card_width)
         card.disable_requested.connect(self.disable_conflict_mod)
-        card.pin_requested.connect(self.pin_conflict_mod)
         card.context_requested.connect(self.show_card_context_menu)
         card.custom_title_changed.connect(self.on_card_custom_title_changed)
         grid.addWidget(card, card_index // columns, card_index % columns, Qt.AlignTop)
@@ -161,7 +168,7 @@ def _show_completed_conflict_report(self, loading_host: QWidget, report_host: QW
     self.cards_layout.addWidget(report_host, 0, 0)
     report_host.show()
     self.content_subtitle.setText(
-        f"发现 {conflict_count} 个已启用 Mod 存在资源冲突；单击卡片置顶优先，双击卡片禁用"
+        f"发现 {conflict_count} 个已启用 Mod 存在资源冲突；右键卡片可置顶，双击卡片禁用"
     )
 
 
@@ -179,42 +186,31 @@ def _rebuild_conflict_group_section(self, index: int) -> None:
     self._conflict_report_sections[index] = new
 
 
-def pin_conflict_mod(self, mod_id: str) -> None:
-    """将冲突组中的某个 Mod 置顶为第一位。
-
-    置顶序号（conflict_pin）取全局最大值 +1，冲突组内按该值排序：
-    最近置顶的排最前，其余保持原有相对顺序。addonlist.txt 写入时
-    同样按此顺序，使游戏优先读取置顶 Mod。
-    """
-    mod = self.mods.get(mod_id)
-    if mod is None or not (mod.active and mod.conflict_with):
+def _rebuild_conflict_report_after_pin(self) -> None:
+    """冲突组内置顶顺序变化后，重算分组并重绘所有分区，使置顶卡片前移、
+    红色图钉即时出现/消失，同时保留当前滚动位置。"""
+    if self._content_mode != "detail" or not hasattr(self, "_conflict_report_context"):
         return
-    next_pin = max((m.conflict_pin for m in self.mods.values()), default=0) + 1
-    mod.conflict_pin = next_pin
-    self.storage.save_mods(self.mods)
-    if self._content_mode == "detail" and hasattr(self, "_conflict_report_groups"):
-        for index, group in enumerate(self._conflict_report_groups):
-            if any(m.id == mod_id for m in group):
-                self._conflict_report_groups[index] = sorted(group, key=conflict_group_sort_key)
-                self._rebuild_conflict_group_section(index)
-                break
-    show_toast(f"已将「{mod.title}」置顶为冲突组首位", self)
+    self._conflict_report_groups = ConflictDialog._conflict_groups(self.mods)
+    for index in list(self._conflict_report_sections.keys()):
+        self._rebuild_conflict_group_section(index)
 
 
-def unpin_conflict_mod(self, mod_id: str) -> None:
-    """取消某 Mod 的置顶，恢复其在冲突组内的默认排序。"""
-    mod = self.mods.get(mod_id)
-    if mod is None or mod.conflict_pin <= 0:
+def _show_conflict_toast(self, message: str) -> None:
+    """把置顶反馈显示在「冲突报告」标题右侧，而非窗口底部。"""
+    target = getattr(self, "content_toast", None)
+    if target is None:
+        show_toast(message, self)
         return
-    mod.conflict_pin = 0
-    self.storage.save_mods(self.mods)
-    if self._content_mode == "detail" and hasattr(self, "_conflict_report_groups"):
-        for index, group in enumerate(self._conflict_report_groups):
-            if any(m.id == mod_id for m in group):
-                self._conflict_report_groups[index] = sorted(group, key=conflict_group_sort_key)
-                self._rebuild_conflict_group_section(index)
-                break
-    show_toast(f"已取消「{mod.title}」的置顶", self)
+    target.setText(message)
+    target.setVisible(True)
+    target.adjustSize()
+    if getattr(self, "_conflict_toast_timer", None) is None:
+        self._conflict_toast_timer = QTimer(self)
+        self._conflict_toast_timer.setSingleShot(True)
+    self._conflict_toast_timer.stop()
+    self._conflict_toast_timer.timeout.connect(lambda: target.setVisible(False))
+    self._conflict_toast_timer.start(3200)
 
 
 def disable_conflict_mod(self, mod_id: str) -> None:

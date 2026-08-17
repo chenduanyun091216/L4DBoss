@@ -169,7 +169,9 @@ THEMES = {
     #hoverOverlay { background: transparent; }
     #hoverHintBox { background: #23344c; border: 1px solid #355577; border-radius: 8px; }
     #hoverHintChip { color: #bcd7ff; font-size: 11px; font-weight: 700; }
-    #headerButton, #headerButtonSecondary, #primaryButton, #secondaryButton, #launchButton, #toggleAllButton { background: #273347; color: #d9e4f4; border: 1px solid #38465c; border-radius: 7px; padding: 5px 10px; font-weight: 700; }
+    #headerButton, #headerButtonSecondary, #primaryButton, #secondaryButton, #launchButton, #toggleAllButton { background: #273347; color: #d9e4f4; border: 1px solid #38465c; border-radius: 7px; padding: 5px 10px; font-size: 13px; font-weight: 700; }
+    #headerButton, #headerButtonSecondary { font-size: 10px; }
+    #primaryButton, #secondaryButton, #launchButton, #toggleAllButton { font-size: 10px; }
     #headerButton:hover, #headerButtonSecondary:hover, #primaryButton:hover, #secondaryButton:hover, #launchButton:hover, #toggleAllButton:hover { background: #3a5378; color: white; border: 2px solid #6aa0ff; }
     #headerIconButton { background: #202c40; border: 0; border-radius: 7px; padding: 0; }
     #headerIconButton:hover { background: #2d65d6; border: 0; }
@@ -246,6 +248,10 @@ THEMES = {
     #cardAction:hover { color: white; background: #3c78ee; border: 2px solid #5b8ced; }
     #cardActionActive { color: #cbd7e8; background: #253247; border: 1px solid #34445c; }
     #cardActionActive:hover { color: white; background: #3c78ee; border: 2px solid #5b8ced; }
+    #cardPinButton { color: #edf4ff; background: rgba(17, 35, 58, 220); border: 1px solid rgba(113, 163, 236, 190); border-radius: 7px; font-size: 10px; font-weight: 700; }
+    #cardPinButton:hover { color: white; background: #2d65d6; border-color: #87b5ff; }
+    #cardPinButton[pinned="true"] { color: #fff7d0; background: #bd7b10; border-color: #ffd45e; }
+    #cardPinButton[pinned="true"]:hover { background: #d99112; }
     #tagButton { border: 0; }
     #tagButton:hover { border: 1px solid #d8e7ff; padding: 0 5px; }
     #favoriteStar { background: transparent; border: none; color: #6c7c93; font-size: 18px; font-weight: 700; padding: 0; }
@@ -257,9 +263,10 @@ THEMES = {
     #searchBox #favoriteFilterButton { background: transparent; border: 0; color: #6c7c93; font-size: 16px; font-weight: 700; padding: 0; }
     #searchBox #favoriteFilterButton:hover { color: #ffc83d; }
     #searchBox #favoriteFilterButton:checked { color: #f5b301; }
-    #searchBox #customTitleFilterButton { background: transparent; border: 1px solid #6c7c93; border-radius: 6px; color: #6c7c93; font-size: 8px; font-weight: 700; padding: 0; }
-    #searchBox #customTitleFilterButton:hover { border-color: #ff6f7d; color: #ff6f7d; }
-    #searchBox #customTitleFilterButton:checked { border-color: #e0393e; color: #e0393e; }
+    #searchBox #customTitleFilterButton { background: transparent; border: 0; color: #6c7c93; font-size: 11px; font-weight: 700; padding: 1px 0 0 0; }
+    #searchBox #customTitleFilterButton:hover { color: #ff6f7d; }
+    #searchBox #customTitleFilterButton:checked { color: #e0393e; }
+    #searchBox #searchBoxSeparator { color: #33404f; font-size: 13px; font-weight: 400; }
     #emptyText { color: #9db2d0; background: transparent; border: 0; padding: 0; font-size: 15px; font-weight: 500; line-height: 1.7; letter-spacing: 0.5px; }
     #paginationBar { min-height: 22px; }
     #paginationButton { min-height: 0; max-height: 22px; color: #cbd7e8; background: #253247; border: 1px solid #34445c; border-radius: 5px; padding: 0 6px; font-size: 11px; }
@@ -270,13 +277,15 @@ THEMES = {
     #steamSyncLabel { color: #bcd7ff; font-size: 11px; font-weight: 700; }
     #steamSyncProgress { min-height: 6px; max-height: 6px; border: 0; border-radius: 3px; background: #263a54; }
     #steamSyncProgress::chunk { border-radius: 3px; background: #4c86eb; }
+    #pinStatusWidget { background: transparent; border: 0; }
+    #pinStatusLabel { color: #9ad6a0; font-size: 11px; font-weight: 700; }
     #footer { background: transparent; border-top: 1px solid #283242; border-bottom-left-radius: 14px; border-bottom-right-radius: 14px; }
     #footer QLabel { color: #9eacc0; padding-right: 12px; }
     #conflictButton { color: #ffabab; background: transparent; border: 0; font-weight: 700; }
     #conflictButton:hover { text-decoration: underline; }
     #conflictButton:disabled { color: #718097; }
     #conflictButton[selected="true"] { border: 1px solid #ff8f99; border-radius: 6px; padding: 3px 6px; }
-    #closeButton { min-width: 30px; max-width: 30px; min-height: 30px; max-height: 30px; padding: 0; border: 0; color: #92a1b6; background: transparent; font-size: 18px; font-weight: 800; }
+    #closeButton { min-width: 24px; max-width: 24px; min-height: 24px; max-height: 24px; padding: 0; border: 0; color: #92a1b6; background: transparent; font-size: 16px; font-weight: 800; }
     #closeButton:hover { color: #ff7a85; background: transparent; }
     #windowControlButton { padding: 0; border: 0; color: #92a1b6; background: transparent; font-size: 16px; font-weight: 700; }
     #windowControlButton:hover { color: #f3f7ff; background: #29364a; border-radius: 5px; }
@@ -290,6 +299,51 @@ THEMES = {
     #contentBackButton { color: #aebfd6; background: transparent; border: 0; padding: 0; }
     #contentBackButton:hover { color: #ffffff; background: rgba(73, 103, 145, 120); border-radius: 5px; }
     #mainDetailsHost, #mainConflictHost { background: transparent; }
+    #customModIntro { color: #b6c6da; padding: 4px 0; }
+    #customModPresetName { min-height: 24px; font-size: 11px; }
+    #customModSurface { background: rgba(18, 27, 42, 165); border: 1px solid rgba(73, 111, 153, 190); border-radius: 12px; }
+    #customModSurface QPushButton { font-size: 11px; }
+    #customModEditorDialog { background: transparent; border: 0; }
+    #customModDialogHeader { background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #1b3150, stop:1 #162338); border: 1px solid #3d6395; border-radius: 11px; }
+    #customModDialogTitle { color: #f4f8ff; font-size: 22px; font-weight: 800; letter-spacing: 1px; }
+    #customModDialogSubtitle { color: #aac0df; font-size: 11px; font-weight: 600; }
+    #customModCloseButton { color: #d3e2f8; background: #233750; border: 1px solid #47698f; border-radius: 8px; font-size: 22px; font-weight: 400; padding: 0 0 3px 0; }
+    #customModCloseButton:hover { color: white; background: #c83d4a; border-color: #ff8c97; }
+    #customModHero { background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #203a5f, stop:1 #172333); border: 1px solid #426b9d; border-radius: 10px; }
+    #customModTitle, #customModPublishTitle { color: #f3f8ff; font-size: 20px; font-weight: 800; }
+    #customModPresetBar { background: rgba(23, 34, 49, 178); border: 1px solid #2d415d; border-radius: 9px; }
+    #customModPresetBar QLabel { color: #d8e7fb; font-weight: 700; }
+    QComboBox#customModCombo { min-height: 26px; background: #111c2b; color: #edf4ff; border: 1px solid #385574; border-radius: 7px; padding: 0 30px 0 9px; font-size: 11px; font-weight: 700; }
+    QComboBox#customModCombo:hover { background: #17283d; border-color: #5c88bb; }
+    QComboBox#customModCombo:focus { border-color: #6d9fff; }
+    QComboBox#customModCombo::drop-down { subcontrol-origin: padding; subcontrol-position: top right; width: 28px; border: 0; border-left: 1px solid #385574; background: #233a58; border-top-right-radius: 6px; border-bottom-right-radius: 6px; }
+    QComboBox#customModCombo::drop-down:hover { background: #2d65d6; }
+    QComboBox#customModCombo QAbstractItemView { background: #152131; color: #eaf2ff; border: 1px solid #42658d; border-radius: 7px; padding: 4px; selection-background-color: #c99818; selection-color: #182232; outline: 0; }
+    QTabWidget#customModTabs::pane { background: transparent; border: 0; }
+    QTabBar#customModTabBar::tab { background: #1b293a; color: #aabed6; border: 1px solid #314967; border-radius: 7px; padding: 5px 14px; margin-right: 5px; font-size: 11px; font-weight: 700; }
+    QTabBar#customModTabBar::tab:hover { background: #263c56; color: #f2f7ff; border-color: #4f79a9; }
+    QTabBar#customModTabBar::tab:selected { background: #c99818; color: #182232; border-color: #f4ca55; }
+    #customModPicker { background: rgba(18, 28, 41, 180); border: 1px solid #2d415d; border-radius: 9px; padding: 5px; color: #b9cbe3; outline: 0; }
+    #customModPicker::item { min-height: 24px; padding: 1px 7px; border-radius: 6px; font-size: 11px; }
+    #customModPicker::item:hover { background: #24364d; color: white; }
+    #customModPicker::item:selected { background: #c99818; color: #182232; font-weight: 700; }
+    #customModPicker::branch { background: transparent; }
+    #customModForm { background: rgba(20, 32, 48, 178); border: 1px solid #2d415d; border-radius: 9px; }
+    #customModForm QLabel { color: #b9cbe3; font-size: 11px; font-weight: 600; }
+    #customModForm QSpinBox, #customModForm QDoubleSpinBox, #customModForm QComboBox { min-height: 23px; background: rgba(16, 25, 36, 210); color: #edf4ff; border: 1px solid #334b6a; border-radius: 6px; padding: 0 8px; font-size: 11px; }
+    #customModForm QSpinBox:focus, #customModForm QDoubleSpinBox:focus, #customModForm QComboBox:focus { border-color: #629bff; }
+    #customModForm QSpinBox::up-button, #customModForm QDoubleSpinBox::up-button { subcontrol-origin: border; subcontrol-position: top right; width: 23px; background: #223d5d; border-left: 1px solid #42688f; border-bottom: 1px solid #42688f; border-top-right-radius: 5px; }
+    #customModForm QSpinBox::down-button, #customModForm QDoubleSpinBox::down-button { subcontrol-origin: border; subcontrol-position: bottom right; width: 23px; background: #1a314c; border-left: 1px solid #42688f; border-bottom-right-radius: 5px; }
+    #customModForm QSpinBox::up-button:hover, #customModForm QSpinBox::down-button:hover, #customModForm QDoubleSpinBox::up-button:hover, #customModForm QDoubleSpinBox::down-button:hover { background: #2d65d6; }
+    #customModApplyButton, #customModResetButton { color: #cfe1ff; background: #233a58; border: 1px solid #3f6694; border-radius: 6px; font-weight: 700; }
+    #customModApplyButton { padding: 6px 10px; }
+    #customModResetButton { min-width: 68px; padding: 4px 7px; font-size: 11px; }
+    #customModApplyButton:hover, #customModResetButton:hover { color: white; background: #2d65d6; border-color: #74a7ff; }
+    #customModPublishDialog { background: #172333; color: #e8f1ff; border: 1px solid #3d6395; border-radius: 12px; }
+    #customModPublishDialog #customModPublishLabel { color: #dce9fb; font-weight: 700; }
+    #customModPublishDialog QLineEdit { background: #101a28; color: #eef5ff; border: 1px solid #3e5f86; border-radius: 7px; padding: 5px 8px; }
+    #customModPublishDialog QLineEdit:focus { border-color: #629bff; }
+    #customModPublishDialog QLineEdit:read-only { color: #b5c7df; background: #121d2b; }
     #mainDetailsPreview { background: #111821; border: 1px solid #29384d; border-radius: 9px; }
     #mainDetailsTitle { color: #f3f7fd; font-size: 18px; font-weight: 800; }
     #mainDetailsField { color: #b6c6da; font-size: 12px; padding: 2px 0; }
@@ -298,6 +352,7 @@ THEMES = {
     #steamDetailsLink:hover { background: #3470bc; color: white; }
     #mainConflictGroup { background: rgba(28, 31, 43, 235); border: 1px solid #a54c5a; border-radius: 10px; }
     #mainConflictGroupTitle { color: #ffc0c7; font-size: 12px; font-weight: 800; }
+    #mainConflictGroupPinHint { color: #ffd77a; background: rgba(212, 160, 23, 36); border: 1px solid #d4a017; border-radius: 4px; padding: 1px 7px; font-size: 10px; font-weight: 700; }
     #mainConflictGroupReason { color: #d4e1f3; background: #202c3d; border: 1px solid #3e506a; border-radius: 5px; padding: 5px 7px; font-size: 10px; }
     #dialogSubtitle { color: #8596af; font-size: 11px; }
     #aboutContent { background: #121924; border-bottom-left-radius: 14px; border-bottom-right-radius: 14px; }
@@ -316,8 +371,8 @@ THEMES = {
     #conflictCard:hover { background: #282333; border-color: #b85866; }
     #conflictCardPinned { background: #20202b; border: 2px solid #d4a017; border-radius: 10px; }
     #conflictCardPinned:hover { background: #282333; border-color: #ffc83d; }
-    #conflictCountBadge { color: #fff4f5; background: #b84752; border: 1px solid #ef7d87; border-radius: 12px; font-size: 11px; font-weight: 800; }
-    #conflictPreview { background: #111821; border-radius: 7px; min-height: 104px; max-height: 104px; }
+    #conflictCountBadge { color: #fff4f5; background: #b84752; border: 1px solid #ef7d87; border-radius: 10px; font-size: 10px; font-weight: 800; }
+    #conflictPreview { background: #111821; border-radius: 7px; }
     #conflictCaption { color: #f08b96; font-size: 11px; font-weight: 700; }
     #conflictMeta { color: #aebbd0; font-size: 9px; }
     #conflictPeers { color: #abb8c9; font-size: 11px; }
@@ -376,7 +431,9 @@ THEMES = {
     #hoverOverlay { background: transparent; }
     #hoverHintBox { background: #f5f9ff; border: 1px solid #9db6d6; border-radius: 8px; }
     #hoverHintChip { color: #2b5bb8; font-size: 11px; font-weight: 700; }
-    #headerButton, #headerButtonSecondary, #primaryButton, #secondaryButton, #launchButton, #toggleAllButton { background: #edf1f9; color: #24334c; border: 1px solid #aab6c8; border-radius: 7px; padding: 5px 10px; font-weight: 700; }
+    #headerButton, #headerButtonSecondary, #primaryButton, #secondaryButton, #launchButton, #toggleAllButton { background: #edf1f9; color: #24334c; border: 1px solid #aab6c8; border-radius: 7px; padding: 5px 10px; font-size: 13px; font-weight: 700; }
+    #headerButton, #headerButtonSecondary { font-size: 10px; }
+    #primaryButton, #secondaryButton, #launchButton, #toggleAllButton { font-size: 10px; }
     #headerButton:hover, #headerButtonSecondary:hover, #primaryButton:hover, #secondaryButton:hover, #launchButton:hover, #toggleAllButton:hover { background: #ffffff; color: #0b2a52; border: 2px solid #4d83eb; }
     #headerIconButton { background: #e4e9f2; border: 0; border-radius: 7px; padding: 0; }
     #headerIconButton:hover { background: #2d65d6; border: 0; }
@@ -453,6 +510,10 @@ THEMES = {
     #cardAction:hover { color: white; background: #3c78ee; border: 2px solid #2d65d6; }
     #cardActionActive { color: #3c4e6b; background: #e9eef7; border: 1px solid #aab6c8; }
     #cardActionActive:hover { color: white; background: #3c78ee; border: 2px solid #2d65d6; }
+    #cardPinButton { color: #244368; background: rgba(245, 249, 255, 230); border: 1px solid #80a6dd; border-radius: 7px; font-size: 10px; font-weight: 700; }
+    #cardPinButton:hover { color: white; background: #2d65d6; border-color: #1c4fd0; }
+    #cardPinButton[pinned="true"] { color: #fff9e6; background: #b97908; border-color: #855400; }
+    #cardPinButton[pinned="true"]:hover { background: #d18a0a; }
     #tagButton { border: 0; }
     #tagButton:hover { border: 1px solid #7fa6e2; padding: 0 5px; }
     #favoriteStar { background: transparent; border: none; color: #b3bccb; font-size: 18px; font-weight: 700; padding: 0; }
@@ -464,9 +525,10 @@ THEMES = {
     #searchBox #favoriteFilterButton { background: transparent; border: 0; color: #b3bccb; font-size: 16px; font-weight: 700; padding: 0; }
     #searchBox #favoriteFilterButton:hover { color: #f5b301; }
     #searchBox #favoriteFilterButton:checked { color: #c98a00; }
-    #searchBox #customTitleFilterButton { background: transparent; border: 1px solid #8a94a6; border-radius: 6px; color: #8a94a6; font-size: 8px; font-weight: 700; padding: 0; }
-    #searchBox #customTitleFilterButton:hover { border-color: #e0393e; color: #e0393e; }
-    #searchBox #customTitleFilterButton:checked { border-color: #e0393e; color: #e0393e; }
+    #searchBox #customTitleFilterButton { background: transparent; border: 0; color: #8a94a6; font-size: 11px; font-weight: 700; padding: 1px 0 0 0; }
+    #searchBox #customTitleFilterButton:hover { color: #e0393e; }
+    #searchBox #customTitleFilterButton:checked { color: #e0393e; }
+    #searchBox #searchBoxSeparator { color: #c2cad6; font-size: 13px; font-weight: 400; }
     #emptyText { color: #5f718e; background: transparent; border: 0; padding: 0; font-size: 15px; font-weight: 500; line-height: 1.7; letter-spacing: 0.5px; }
     #paginationBar { min-height: 22px; }
     #paginationButton { min-height: 0; max-height: 22px; color: #3c4e6b; background: #e9eef7; border: 1px solid #aab6c8; border-radius: 5px; padding: 0 6px; font-size: 11px; }
@@ -477,13 +539,15 @@ THEMES = {
     #steamSyncLabel { color: #2b5bb8; font-size: 11px; font-weight: 700; }
     #steamSyncProgress { min-height: 6px; max-height: 6px; border: 0; border-radius: 3px; background: #d6e2f5; }
     #steamSyncProgress::chunk { border-radius: 3px; background: #4c86eb; }
+    #pinStatusWidget { background: transparent; border: 0; }
+    #pinStatusLabel { color: #2e8b4f; font-size: 11px; font-weight: 700; }
     #footer { background: transparent; border-top: 1px solid #9aa7ba; border-bottom-left-radius: 14px; border-bottom-right-radius: 14px; }
     #footer QLabel { color: #64738b; padding-right: 12px; }
     #conflictButton { color: #d3404d; background: transparent; border: 0; font-weight: 700; }
     #conflictButton:hover { text-decoration: underline; }
     #conflictButton:disabled { color: #9aa7ba; }
     #conflictButton[selected="true"] { border: 1px solid #f07a85; border-radius: 6px; padding: 3px 6px; }
-    #closeButton { min-width: 30px; max-width: 30px; min-height: 30px; max-height: 30px; padding: 0; border: 0; color: #7b8aa1; background: transparent; font-size: 18px; font-weight: 800; }
+    #closeButton { min-width: 24px; max-width: 24px; min-height: 24px; max-height: 24px; padding: 0; border: 0; color: #7b8aa1; background: transparent; font-size: 16px; font-weight: 800; }
     #closeButton:hover { color: #ff7a85; background: transparent; }
     #windowControlButton { padding: 0; border: 0; color: #7b8aa1; background: transparent; font-size: 16px; font-weight: 700; }
     #windowControlButton:hover { color: #22334e; background: #dde5f1; border-radius: 5px; }
@@ -497,6 +561,51 @@ THEMES = {
     #contentBackButton { color: #5f6f88; background: transparent; border: 0; padding: 0; }
     #contentBackButton:hover { color: #173a6d; background: rgba(45, 101, 214, 30); border-radius: 5px; }
     #mainDetailsHost, #mainConflictHost { background: transparent; }
+    #customModIntro { color: #42536d; padding: 4px 0; }
+    #customModPresetName { min-height: 24px; font-size: 11px; }
+    #customModSurface { background: rgba(248, 251, 255, 165); border: 1px solid rgba(139, 177, 224, 200); border-radius: 12px; }
+    #customModSurface QPushButton { font-size: 11px; }
+    #customModEditorDialog { background: transparent; border: 0; }
+    #customModDialogHeader { background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #dbeafe, stop:1 #edf5ff); border: 1px solid #9bbde8; border-radius: 11px; }
+    #customModDialogTitle { color: #1d426f; font-size: 22px; font-weight: 800; letter-spacing: 1px; }
+    #customModDialogSubtitle { color: #527397; font-size: 11px; font-weight: 600; }
+    #customModCloseButton { color: #345b86; background: #e5f0ff; border: 1px solid #9dbce3; border-radius: 8px; font-size: 22px; font-weight: 400; padding: 0 0 3px 0; }
+    #customModCloseButton:hover { color: white; background: #c83d4a; border-color: #a92b38; }
+    #customModHero { background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #dcecff, stop:1 #f4f8fd); border: 1px solid #9abce9; border-radius: 10px; }
+    #customModTitle, #customModPublishTitle { color: #203653; font-size: 20px; font-weight: 800; }
+    #customModPresetBar { background: rgba(238, 245, 255, 178); border: 1px solid #bfd1eb; border-radius: 9px; }
+    #customModPresetBar QLabel { color: #40556e; font-weight: 700; }
+    QComboBox#customModCombo { min-height: 26px; background: #ffffff; color: #29425f; border: 1px solid #a8c1e1; border-radius: 7px; padding: 0 30px 0 9px; font-size: 11px; font-weight: 700; }
+    QComboBox#customModCombo:hover { background: #f2f7ff; border-color: #719ed0; }
+    QComboBox#customModCombo:focus { border-color: #3975c9; }
+    QComboBox#customModCombo::drop-down { subcontrol-origin: padding; subcontrol-position: top right; width: 28px; border: 0; border-left: 1px solid #aac2df; background: #dceafb; border-top-right-radius: 6px; border-bottom-right-radius: 6px; }
+    QComboBox#customModCombo::drop-down:hover { background: #a9c9ee; }
+    QComboBox#customModCombo QAbstractItemView { background: #f9fbff; color: #29425f; border: 1px solid #9db9dc; border-radius: 7px; padding: 4px; selection-background-color: #d6a112; selection-color: #253443; outline: 0; }
+    QTabWidget#customModTabs::pane { background: transparent; border: 0; }
+    QTabBar#customModTabBar::tab { background: #e7f0fb; color: #50657f; border: 1px solid #b7cae3; border-radius: 7px; padding: 5px 14px; margin-right: 5px; font-size: 11px; font-weight: 700; }
+    QTabBar#customModTabBar::tab:hover { background: #d7e7fb; color: #1d3656; border-color: #88addb; }
+    QTabBar#customModTabBar::tab:selected { background: #d6a112; color: #253443; border-color: #b77d00; }
+    #customModPicker { background: rgba(245, 249, 255, 180); border: 1px solid #bfd1eb; border-radius: 9px; padding: 5px; color: #40556e; outline: 0; }
+    #customModPicker::item { min-height: 24px; padding: 1px 7px; border-radius: 6px; font-size: 11px; }
+    #customModPicker::item:hover { background: #dceaff; color: #1d3656; }
+    #customModPicker::item:selected { background: #d6a112; color: #253443; font-weight: 700; }
+    #customModPicker::branch { background: transparent; }
+    #customModForm { background: rgba(249, 251, 255, 176); border: 1px solid #bfd1eb; border-radius: 9px; }
+    #customModForm QLabel { color: #40556e; font-size: 11px; font-weight: 600; }
+    #customModForm QSpinBox, #customModForm QDoubleSpinBox, #customModForm QComboBox { min-height: 23px; background: rgba(255, 255, 255, 212); color: #243b58; border: 1px solid #a9c0df; border-radius: 6px; padding: 0 8px; font-size: 11px; }
+    #customModForm QSpinBox:focus, #customModForm QDoubleSpinBox:focus, #customModForm QComboBox:focus { border-color: #3975c9; }
+    #customModForm QSpinBox::up-button, #customModForm QDoubleSpinBox::up-button { subcontrol-origin: border; subcontrol-position: top right; width: 23px; background: #d9e9fb; border-left: 1px solid #9fb9dc; border-bottom: 1px solid #9fb9dc; border-top-right-radius: 5px; }
+    #customModForm QSpinBox::down-button, #customModForm QDoubleSpinBox::down-button { subcontrol-origin: border; subcontrol-position: bottom right; width: 23px; background: #c9ddf4; border-left: 1px solid #9fb9dc; border-bottom-right-radius: 5px; }
+    #customModForm QSpinBox::up-button:hover, #customModForm QSpinBox::down-button:hover, #customModForm QDoubleSpinBox::up-button:hover, #customModForm QDoubleSpinBox::down-button:hover { background: #79a7dd; }
+    #customModApplyButton, #customModResetButton { color: #28548c; background: #e0ecfb; border: 1px solid #a8c4e8; border-radius: 6px; font-weight: 700; }
+    #customModApplyButton { padding: 6px 10px; }
+    #customModResetButton { min-width: 68px; padding: 4px 7px; font-size: 11px; }
+    #customModApplyButton:hover, #customModResetButton:hover { color: white; background: #3975c9; border-color: #3975c9; }
+    #customModPublishDialog { background: #f4f8fd; color: #22334e; border: 1px solid #9dbce3; border-radius: 12px; }
+    #customModPublishDialog #customModPublishLabel { color: #355473; font-weight: 700; }
+    #customModPublishDialog QLineEdit { background: #ffffff; color: #223b59; border: 1px solid #a9c0df; border-radius: 7px; padding: 5px 8px; }
+    #customModPublishDialog QLineEdit:focus { border-color: #3975c9; }
+    #customModPublishDialog QLineEdit:read-only { color: #5d728d; background: #eef5ff; }
     #mainDetailsPreview { background: #eef2f8; border: 1px solid #b3c0d4; border-radius: 9px; }
     #mainDetailsTitle { color: #1c2a43; font-size: 18px; font-weight: 800; }
     #mainDetailsField { color: #42536d; font-size: 12px; padding: 2px 0; }
@@ -505,6 +614,7 @@ THEMES = {
     #steamDetailsLink:hover { background: #3470bc; color: white; }
     #mainConflictGroup { background: rgba(255, 250, 251, 242); border: 1px solid #e0a3ab; border-radius: 10px; }
     #mainConflictGroupTitle { color: #c24552; font-size: 12px; font-weight: 800; }
+    #mainConflictGroupPinHint { color: #8a5d00; background: rgba(201, 138, 0, 26); border: 1px solid #c98a00; border-radius: 4px; padding: 1px 7px; font-size: 10px; font-weight: 700; }
     #mainConflictGroupReason { color: #4a5a73; background: #fbeef0; border: 1px solid #e5b4bb; border-radius: 5px; padding: 5px 7px; font-size: 10px; }
     #dialogSubtitle { color: #64748e; font-size: 11px; }
     #aboutContent { background: #ffffff; border-bottom-left-radius: 14px; border-bottom-right-radius: 14px; }
@@ -523,8 +633,8 @@ THEMES = {
     #conflictCard:hover { background: #ffecef; border-color: #ef7a86; }
     #conflictCardPinned { background: #fff5f6; border: 2px solid #c98a00; border-radius: 10px; }
     #conflictCardPinned:hover { background: #ffecef; border-color: #f5b301; }
-    #conflictCountBadge { color: #fff4f5; background: #b84752; border: 1px solid #ef7d87; border-radius: 12px; font-size: 11px; font-weight: 800; }
-    #conflictPreview { background: #eef2f8; border-radius: 7px; min-height: 104px; max-height: 104px; }
+    #conflictCountBadge { color: #fff4f5; background: #b84752; border: 1px solid #ef7d87; border-radius: 10px; font-size: 10px; font-weight: 800; }
+    #conflictPreview { background: #eef2f8; border-radius: 7px; }
     #conflictCaption { color: #c04a56; font-size: 11px; font-weight: 700; }
     #conflictMeta { color: #64748c; font-size: 9px; }
     #conflictPeers { color: #4a5a72; font-size: 11px; }
@@ -583,7 +693,8 @@ THEMES = {
     #hoverOverlay { background: transparent; }
     #hoverHintBox { background: #3d4753; border: 1px solid #aab1ba; border-radius: 8px; }
     #hoverHintChip { color: #dbe4ef; font-size: 11px; font-weight: 700; }
-    #headerButton, #headerButtonSecondary { background: transparent; color: #e3eaf4; border: 1px solid #aab1ba; border-radius: 7px; padding: 5px 10px; font-weight: 700; }
+    #headerButton, #headerButtonSecondary { background: transparent; color: #e3eaf4; border: 1px solid #aab1ba; border-radius: 7px; padding: 5px 10px; font-size: 10px; font-weight: 700; }
+    #primaryButton, #secondaryButton, #launchButton, #toggleAllButton { font-size: 10px; }
     #headerButton:hover, #headerButtonSecondary:hover { background: #2d65d6; color: #ffffff; border: 2px solid #2d65d6; }
     /* 底部四个操作按钮（全部启动/保存/另存为/启动游戏）：透明底 + 国网绿描边，悬浮时背景变为国网绿 */
     #toggleAllButton, #primaryButton, #secondaryButton, #launchButton { background: transparent; color: #e3eaf4; border: 1px solid #aab1ba; border-radius: 7px; padding: 5px 10px; font-weight: 700; }
@@ -662,6 +773,10 @@ THEMES = {
     #cardAction:hover { color: white; background: #7d93c4; border: 2px solid #7089c0; }
     #cardActionActive { color: #3c4652; background: #acb1b8; border: 1px solid #8b929c; }
     #cardActionActive:hover { color: white; background: #7d93c4; border: 2px solid #7089c0; }
+    #cardPinButton { color: #22313e; background: rgba(213, 217, 221, 225); border: 1px solid #808996; border-radius: 7px; font-size: 10px; font-weight: 700; }
+    #cardPinButton:hover { color: white; background: #637aa9; border-color: #4f6691; }
+    #cardPinButton[pinned="true"] { color: #fff8dd; background: #966f16; border-color: #d8bb5c; }
+    #cardPinButton[pinned="true"]:hover { background: #ad821a; }
     #tagButton { border: 0; }
     #tagButton:hover { border: 1px solid #8b929c; padding: 0 5px; }
     #favoriteStar { background: transparent; border: none; color: #969da7; font-size: 18px; font-weight: 700; padding: 0; }
@@ -673,9 +788,10 @@ THEMES = {
     #searchBox #favoriteFilterButton { background: transparent; border: 0; color: #969da7; font-size: 16px; font-weight: 700; padding: 0; }
     #searchBox #favoriteFilterButton:hover { color: #c5a74e; }
     #searchBox #favoriteFilterButton:checked { color: #a8893f; }
-    #searchBox #customTitleFilterButton { background: transparent; border: 1px solid #969da7; border-radius: 6px; color: #969da7; font-size: 8px; font-weight: 700; padding: 0; }
-    #searchBox #customTitleFilterButton:hover { border-color: #ff6f7d; color: #ff6f7d; }
-    #searchBox #customTitleFilterButton:checked { border-color: #e0393e; color: #e0393e; }
+    #searchBox #customTitleFilterButton { background: transparent; border: 0; color: #969da7; font-size: 11px; font-weight: 700; padding: 1px 0 0 0; }
+    #searchBox #customTitleFilterButton:hover { color: #ff6f7d; }
+    #searchBox #customTitleFilterButton:checked { color: #e0393e; }
+    #searchBox #searchBoxSeparator { color: #6a7480; font-size: 13px; font-weight: 400; }
     #emptyText { color: #c2cddb; background: transparent; border: 0; padding: 0; font-size: 15px; font-weight: 500; line-height: 1.7; letter-spacing: 0.5px; }
     #paginationBar { min-height: 22px; }
     #paginationButton { min-height: 0; max-height: 22px; color: #e3eaf4; background: transparent; border: 1px solid #aab1ba; border-radius: 5px; padding: 0 6px; font-size: 11px; }
@@ -686,13 +802,15 @@ THEMES = {
     #steamSyncLabel { color: #dbe4ef; font-size: 11px; font-weight: 700; }
     #steamSyncProgress { min-height: 6px; max-height: 6px; border: 0; border-radius: 3px; background: #c3c9d1; }
     #steamSyncProgress::chunk { border-radius: 3px; background: #9fc3ff; }
+    #pinStatusWidget { background: transparent; border: 0; }
+    #pinStatusLabel { color: #9ad6a0; font-size: 11px; font-weight: 700; }
     #footer { background: transparent; border-top: 1px solid #7e848b; border-bottom-left-radius: 14px; border-bottom-right-radius: 14px; }
     #footer QLabel { color: #b9c6d6; padding-right: 12px; }
     #conflictButton { color: #ff9aa3; background: transparent; border: 0; font-weight: 700; }
     #conflictButton:hover { text-decoration: underline; }
     #conflictButton:disabled { color: #8a94a0; }
     #conflictButton[selected="true"] { border: 1px solid #ff8f99; border-radius: 6px; padding: 3px 6px; }
-    #closeButton { min-width: 30px; max-width: 30px; min-height: 30px; max-height: 30px; padding: 0; border: 0; color: #dbe4ef; background: transparent; font-size: 18px; font-weight: 800; }
+    #closeButton { min-width: 24px; max-width: 24px; min-height: 24px; max-height: 24px; padding: 0; border: 0; color: #dbe4ef; background: transparent; font-size: 16px; font-weight: 800; }
     #closeButton:hover { color: #ff7a85; background: transparent; }
     #windowControlButton { padding: 0; border: 0; color: #dbe4ef; background: transparent; font-size: 16px; font-weight: 700; }
     #windowControlButton:hover { color: #ffffff; background: #3f4854; border-radius: 5px; }
@@ -706,6 +824,51 @@ THEMES = {
     #contentBackButton { color: #b9c6d6; background: transparent; border: 0; padding: 0; }
     #contentBackButton:hover { color: #9fc3ff; background: rgba(122, 170, 255, 40); border-radius: 5px; }
     #mainDetailsHost, #mainConflictHost { background: transparent; }
+    #customModIntro { color: #c2cddb; padding: 4px 0; }
+    #customModPresetName { min-height: 24px; font-size: 11px; }
+    #customModSurface { background: rgba(184, 188, 194, 166); border: 1px solid rgba(105, 116, 129, 205); border-radius: 12px; }
+    #customModSurface QPushButton { font-size: 11px; }
+    #customModEditorDialog { background: transparent; border: 0; }
+    #customModDialogHeader { background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #707986, stop:1 #8f98a3); border: 1px solid #5f6873; border-radius: 11px; }
+    #customModDialogTitle { color: #f5f7fb; font-size: 22px; font-weight: 800; letter-spacing: 1px; }
+    #customModDialogSubtitle { color: #e0e6ee; font-size: 11px; font-weight: 600; }
+    #customModCloseButton { color: #f3f6fb; background: #687482; border: 1px solid #4e5966; border-radius: 8px; font-size: 22px; font-weight: 400; padding: 0 0 3px 0; }
+    #customModCloseButton:hover { color: white; background: #b73c48; border-color: #e07780; }
+    #customModHero { background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #737b87, stop:1 #9fa5ad); border: 1px solid #656c75; border-radius: 10px; }
+    #customModTitle, #customModPublishTitle { color: #f5f7fb; font-size: 20px; font-weight: 800; }
+    #customModPresetBar { background: rgba(174, 179, 186, 180); border: 1px solid #777e87; border-radius: 9px; }
+    #customModPresetBar QLabel { color: #263444; font-weight: 700; }
+    QComboBox#customModCombo { min-height: 26px; background: #c6cbd1; color: #253443; border: 1px solid #747d87; border-radius: 7px; padding: 0 30px 0 9px; font-size: 11px; font-weight: 700; }
+    QComboBox#customModCombo:hover { background: #d5d9de; border-color: #536f8f; }
+    QComboBox#customModCombo:focus { border-color: #315f9e; }
+    QComboBox#customModCombo::drop-down { subcontrol-origin: padding; subcontrol-position: top right; width: 28px; border: 0; border-left: 1px solid #747d87; background: #8a949f; border-top-right-radius: 6px; border-bottom-right-radius: 6px; }
+    QComboBox#customModCombo::drop-down:hover { background: #5476a3; }
+    QComboBox#customModCombo QAbstractItemView { background: #b7bdc4; color: #253443; border: 1px solid #69727d; border-radius: 7px; padding: 4px; selection-background-color: #be8a17; selection-color: #1f2b38; outline: 0; }
+    QTabWidget#customModTabs::pane { background: transparent; border: 0; }
+    QTabBar#customModTabBar::tab { background: #989ea7; color: #23303e; border: 1px solid #727983; border-radius: 7px; padding: 5px 14px; margin-right: 5px; font-size: 11px; font-weight: 700; }
+    QTabBar#customModTabBar::tab:hover { background: #b9bfc7; color: #142131; border-color: #5f6873; }
+    QTabBar#customModTabBar::tab:selected { background: #be8a17; color: #1f2b38; border-color: #edc451; }
+    #customModPicker { background: rgba(166, 171, 178, 180); border: 1px solid #747b84; border-radius: 9px; padding: 5px; color: #24313f; outline: 0; }
+    #customModPicker::item { min-height: 24px; padding: 1px 7px; border-radius: 6px; font-size: 11px; }
+    #customModPicker::item:hover { background: #c1c6cc; color: #142131; }
+    #customModPicker::item:selected { background: #be8a17; color: #1f2b38; font-weight: 700; }
+    #customModPicker::branch { background: transparent; }
+    #customModForm { background: rgba(183, 188, 195, 178); border: 1px solid #777e87; border-radius: 9px; }
+    #customModForm QLabel { color: #263444; font-size: 11px; font-weight: 700; }
+    #customModForm QSpinBox, #customModForm QDoubleSpinBox, #customModForm QComboBox { min-height: 23px; background: rgba(211, 215, 220, 212); color: #1f2b38; border: 1px solid #7a828b; border-radius: 6px; padding: 0 8px; font-size: 11px; }
+    #customModForm QSpinBox:focus, #customModForm QDoubleSpinBox:focus, #customModForm QComboBox:focus { border-color: #315f9e; }
+    #customModForm QSpinBox::up-button, #customModForm QDoubleSpinBox::up-button { subcontrol-origin: border; subcontrol-position: top right; width: 23px; background: #8c96a1; border-left: 1px solid #67717d; border-bottom: 1px solid #67717d; border-top-right-radius: 5px; }
+    #customModForm QSpinBox::down-button, #customModForm QDoubleSpinBox::down-button { subcontrol-origin: border; subcontrol-position: bottom right; width: 23px; background: #7b858f; border-left: 1px solid #67717d; border-bottom-right-radius: 5px; }
+    #customModForm QSpinBox::up-button:hover, #customModForm QSpinBox::down-button:hover, #customModForm QDoubleSpinBox::up-button:hover, #customModForm QDoubleSpinBox::down-button:hover { background: #406dac; }
+    #customModApplyButton, #customModResetButton { color: #eff5ff; background: #526477; border: 1px solid #3e4e5f; border-radius: 6px; font-weight: 700; }
+    #customModApplyButton { padding: 6px 10px; }
+    #customModResetButton { min-width: 68px; padding: 4px 7px; font-size: 11px; }
+    #customModApplyButton:hover, #customModResetButton:hover { color: white; background: #315f9e; border-color: #7199d1; }
+    #customModPublishDialog { background: #adb2b9; color: #1f2b38; border: 1px solid #68727e; border-radius: 12px; }
+    #customModPublishDialog #customModPublishLabel { color: #1f2d3c; font-weight: 700; }
+    #customModPublishDialog QLineEdit { background: #d6d9de; color: #1f2b38; border: 1px solid #7a838e; border-radius: 7px; padding: 5px 8px; }
+    #customModPublishDialog QLineEdit:focus { border-color: #406dac; }
+    #customModPublishDialog QLineEdit:read-only { color: #526170; background: #c9ced5; }
     #mainDetailsPreview { background: #3a424d; border: 1px solid #4a545f; border-radius: 9px; }
     #mainDetailsTitle { color: #f2f6fc; font-size: 18px; font-weight: 800; }
     #mainDetailsField { color: #c2cddb; font-size: 12px; padding: 2px 0; }
@@ -714,6 +877,7 @@ THEMES = {
     #steamDetailsLink:hover { background: #3470bc; color: white; }
     #mainConflictGroup { background: rgba(250, 240, 242, 115); border: 1px solid #d99aa2; border-radius: 10px; }
     #mainConflictGroupTitle { color: #b0404c; font-size: 12px; font-weight: 800; }
+    #mainConflictGroupPinHint { color: #e6b94f; background: rgba(212, 160, 23, 30); border: 1px solid #c98a00; border-radius: 4px; padding: 1px 7px; font-size: 10px; font-weight: 700; }
     #mainConflictGroupReason { color: #4a3a42; background: rgba(251, 238, 240, 125); border: 1px solid #e0aab1; border-radius: 5px; padding: 5px 7px; font-size: 10px; }
     #dialogSubtitle { color: #b9c6d6; font-size: 11px; }
     #aboutContent { background: #363e48; border-bottom-left-radius: 14px; border-bottom-right-radius: 14px; }
@@ -732,8 +896,8 @@ THEMES = {
     #conflictCard:hover { background: rgba(251, 238, 240, 135); border-color: #e0757f; }
     #conflictCardPinned { background: rgba(247, 230, 233, 115); border: 2px solid #c98a00; border-radius: 10px; }
     #conflictCardPinned:hover { background: rgba(251, 238, 240, 135); border-color: #f5b301; }
-    #conflictCountBadge { color: #fff4f5; background: #a53a44; border: 1px solid #e2626c; border-radius: 12px; font-size: 11px; font-weight: 800; }
-    #conflictPreview { background: rgba(227, 230, 235, 110); border-radius: 7px; min-height: 104px; max-height: 104px; }
+    #conflictCountBadge { color: #fff4f5; background: #a53a44; border: 1px solid #e2626c; border-radius: 10px; font-size: 10px; font-weight: 800; }
+    #conflictPreview { background: rgba(227, 230, 235, 110); border-radius: 7px; }
     #conflictCaption { color: #b0404c; font-size: 11px; font-weight: 700; }
     #conflictMeta { color: #5a6575; font-size: 9px; }
     #conflictPeers { color: #3c4757; font-size: 11px; }

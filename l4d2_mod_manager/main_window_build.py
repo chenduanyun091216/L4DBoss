@@ -48,6 +48,7 @@ def _build_ui(self) -> None:
     body.setHandleWidth(1)
     sidebar = QWidget()
     sidebar.setObjectName("sidebar")
+    self.sidebar = sidebar
     sidebar.setMinimumWidth(ui(230))
     side_layout = QVBoxLayout(sidebar)
     side_layout.setContentsMargins(ui(16), ui(18), ui(12), ui(16))
@@ -206,7 +207,7 @@ def _build_header(self) -> QWidget:
     header.setObjectName("header")
     header.setFixedHeight(ui(56))
     layout = QHBoxLayout(header)
-    layout.setContentsMargins(ui(24), ui(4), ui(8), ui(4))
+    layout.setContentsMargins(ui(24), ui(4), ui(4), ui(4))
     # 主布局间距收窄为 1px：头部 4 个按钮放进独立子布局（内部仍为 11px），
     # 使“主题”按钮与右上角窗口控制按钮的间隙由 11px 收窄为 1px，
     # 整个按钮组因此整体右移约 10px。
@@ -254,6 +255,22 @@ def _build_header(self) -> QWidget:
     brand.addWidget(sub)
     layout.addLayout(brand)
     layout.addStretch(1)
+    # 置顶反馈提示：位于头部“选择游戏”按钮左侧的空白区域，紧邻按钮显示，
+    # 不与底部 toast 重叠；空闲时隐藏不占空间，显示后短暂自动消失。
+    self.pin_status_widget = QWidget()
+    self.pin_status_widget.setObjectName("pinStatusWidget")
+    self.pin_status_widget.setFixedHeight(ui(30))
+    pin_layout = QHBoxLayout(self.pin_status_widget)
+    pin_layout.setContentsMargins(ui(10), 0, ui(10), 0)
+    pin_layout.setSpacing(ui(8))
+    self.pin_status_label = QLabel("")
+    self.pin_status_label.setObjectName("pinStatusLabel")
+    pin_layout.addWidget(self.pin_status_label)
+    self.pin_status_widget.hide()
+    self._pin_status_timer = QTimer(self)
+    self._pin_status_timer.setSingleShot(True)
+    self._pin_status_timer.timeout.connect(self.pin_status_widget.hide)
+    self.pin_status_widget.setParent(header)
     # 底部进度条（选择游戏/扫描 Mod/同步 Steam/恢复组合共用）位于头部
     # “选择游戏”按钮左侧的空白区域：紧邻触发它的按钮，空闲时隐藏不占空间，
     # 显示期间与右侧按钮同一水平行、互不遮盖。
@@ -275,7 +292,7 @@ def _build_header(self) -> QWidget:
     self.steam_sync_progress.setFixedWidth(ui(92))
     sync_layout.addWidget(self.steam_sync_progress)
     self.steam_sync_widget.hide()
-    layout.addWidget(self.steam_sync_widget)
+    self.steam_sync_widget.setParent(header)
     # 同步进度条与按钮组之间保持 11px 间距（1px 主间距 + 10px 固定间距）。
     layout.addSpacing(ui(10))
     # 头部四个按钮（选择游戏/扫描 Mod/同步 Steam/主题）不再使用悬浮弹框
@@ -285,52 +302,69 @@ def _build_header(self) -> QWidget:
         secondary=True,
     )
     self.refresh_button = self._header_button(
-        QStyle.SP_BrowserReload, "扫描 Mod", lambda: self.scan_mods(False),
+        QStyle.SP_BrowserReload, "扫描Mod", lambda: self.scan_mods(False),
     )
     self.fetch_button = self._header_button(
-        QStyle.SP_ArrowDown, "同步 Steam", self.fetch_steam_info,
+        QStyle.SP_ArrowDown, "同步Steam", self.fetch_steam_info,
     )
     # 头部四个按钮放入独立子布局：按钮之间仍保持 11px 间距。
     self.header_action_layout = QHBoxLayout()
     self.header_action_layout.setSpacing(ui(11))
-    self.header_action_layout.addWidget(self.choose_button)
-    self.header_action_layout.addWidget(self.refresh_button)
-    self.header_action_layout.addWidget(self.fetch_button)
     for button in (self.choose_button, self.refresh_button, self.fetch_button):
         button.installEventFilter(self)
     self.toggle_all_button = self._header_button(QStyle.SP_DialogApplyButton, "全部启动", self.toggle_all_mods)
     # 虽然创建于头部，但最终被加入底部操作栏；用独立 objectName
     # 以便钛色灰主题将底部四个按钮统一样式为“幽灵绿”风格。
     self.toggle_all_button.setObjectName("toggleAllButton")
-    self.header_action_layout.addWidget(self.toggle_all_button)
     self.theme_button = self._header_button(
         QStyle.SP_DesktopIcon, "", self._open_theme_menu,
     )
     self._update_theme_button()
+    self.custom_mod_button = self._header_button(
+        QStyle.SP_FileDialogDetailedView, "创建mod", self.open_custom_mod_dialog,
+    )
+    # These are the four controls that form the header action group.  The
+    # custom-Mod button is deliberately kept separate: its left edge is the
+    # alignment anchor for the collection picker below.
     self._header_action_buttons = (
         self.choose_button, self.refresh_button, self.fetch_button, self.theme_button,
     )
     header_action_width = max(button.sizeHint().width() for button in self._header_action_buttons) + ui(4)
     for button in self._header_action_buttons:
         button.setFixedWidth(header_action_width)
-    self.header_action_layout.addWidget(self.theme_button)
+    # The custom-Mod button is positioned independently below because its
+    # left edge must track the collection picker, not the native title-bar
+    # controls that occupy the far right of the header.
+    for button in (*self._header_action_buttons, self.toggle_all_button, self.custom_mod_button):
+        self.header_action_layout.removeWidget(button)
+        button.setParent(header)
+        button.show()
+    self.custom_mod_button.setFixedWidth(self.custom_mod_button.sizeHint().width())
+    self.custom_mod_button.setFixedHeight(ui(30))
+    self.custom_mod_button.show()
     layout.addLayout(self.header_action_layout)
+    # The native window controls are narrower than the collection picker.
+    # This spacer is adjusted after the content bar settles so the header
+    # action group can share the search/combo left edges exactly.
+    self.header_alignment_spacer = QWidget()
+    self.header_alignment_spacer.setFixedWidth(0)
+    layout.addWidget(self.header_alignment_spacer)
     close = QPushButton("×")
     close.setObjectName("closeButton")
     close.setText("×")
     self.minimize_button = self._window_control_button("−", None, self.showMinimized)
     self.maximize_button = self._window_control_button("□", None, self.toggle_maximized)
-    close.setFixedSize(ui(30), ui(30))
+    close.setFixedSize(ui(24), ui(24))
     close.clicked.connect(self.close)
     window_controls = QHBoxLayout()
     window_controls.setContentsMargins(0, 0, 0, 0)
-    window_controls.setSpacing(ui(4))
+    window_controls.setSpacing(ui(1))
     window_controls.addWidget(self.minimize_button)
     window_controls.addWidget(self.maximize_button)
     window_controls.addWidget(close)
     layout.addLayout(window_controls)
     self.close_button = close
-    for button in (self.theme_button, self.minimize_button, self.maximize_button, self.close_button):
+    for button in (self.theme_button, self.custom_mod_button, self.minimize_button, self.maximize_button, self.close_button):
         button.installEventFilter(self)
     return header
 
@@ -339,6 +373,7 @@ def _header_button(
     self, icon, text, handler, secondary: bool = False, icon_only: bool = False, tooltip: str = "",
 ) -> QPushButton:
     button = QPushButton(self.style().standardIcon(icon), text)
+    button.setIconSize(QSize(ui(14), ui(14)))
     if icon_only:
         button.setText("")
         button.setObjectName("headerIconButton")
@@ -357,7 +392,7 @@ def _header_button(
 def _window_control_button(symbol: str, tooltip: str, handler) -> QPushButton:
     button = QPushButton(symbol)
     button.setObjectName("windowControlButton")
-    button.setFixedSize(ui(30), ui(30))
+    button.setFixedSize(ui(24), ui(24))
     if tooltip:
         button.setToolTip(tooltip)
     button.clicked.connect(handler)
@@ -550,6 +585,12 @@ def _build_content_bar(self) -> QWidget:
     title_box.addWidget(self.content_title)
     title_box.addWidget(self.content_subtitle)
     layout.addWidget(self.content_title_host)
+    self.content_toast = QLabel()
+    self.content_toast.setObjectName("contentToast")
+    self.content_toast.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+    self.content_toast.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
+    self.content_toast.hide()
+    layout.addWidget(self.content_toast)
     layout.addStretch(1)
     # 搜索框容器：左侧内嵌“只看收藏”星星按钮，视觉上与搜索框融为一体。
     self.search_box = QWidget()
@@ -566,6 +607,7 @@ def _build_content_bar(self) -> QWidget:
     self.favorite_filter_button.setCursor(Qt.PointingHandCursor)
     # 星形按钮占满搜索框高度，与右侧下拉按钮的高度观感一致。
     self.favorite_filter_button.setFixedSize(ui(26), ui(32))
+    self.favorite_filter_button.setFocusPolicy(Qt.NoFocus)
     self.favorite_filter_button.clicked.connect(self.toggle_favorite_filter)
     # 与其他按钮一致：悬停提示使用统一的置顶提示层，锚定在搜索框左侧空白处。
     self.favorite_filter_button.installEventFilter(self)
@@ -574,17 +616,25 @@ def _build_content_bar(self) -> QWidget:
     self.custom_title_filter_button.setObjectName("customTitleFilterButton")
     self.custom_title_filter_button.setCheckable(True)
     self.custom_title_filter_button.setCursor(Qt.PointingHandCursor)
-    # 小圆点外形：圆框紧贴“改”字（内边距约 1px），整体最紧凑。
-    self.custom_title_filter_button.setFixedSize(ui(12), ui(12))
+    # 与收藏星标使用相同的点击高度与垂直基线，避免“改”字显得下沉。
+    self.custom_title_filter_button.setFixedSize(ui(26), ui(32))
+    self.custom_title_filter_button.setFocusPolicy(Qt.NoFocus)
     self.custom_title_filter_button.setToolTip("只看改名：仅显示自定义了名称的 Mod")
     self.custom_title_filter_button.clicked.connect(self.toggle_custom_title_filter)
     self.custom_title_filter_button.installEventFilter(self)
+    # “改”按钮与右侧搜索输入框之间的分隔竖线。
+    self.search_box_separator = QLabel("|")
+    self.search_box_separator.setObjectName("searchBoxSeparator")
+    self.search_box_separator.setFixedHeight(ui(18))
+    self.search_box_separator.setAlignment(Qt.AlignCenter)
     # 星形与“改”组成紧凑子布局，二者间距更小。
     star_filter_group = QHBoxLayout()
     star_filter_group.setContentsMargins(0, 0, 0, 0)
     star_filter_group.setSpacing(0)
-    star_filter_group.addWidget(self.favorite_filter_button)
-    star_filter_group.addWidget(self.custom_title_filter_button)
+    star_filter_group.addWidget(self.favorite_filter_button, 0, Qt.AlignVCenter)
+    star_filter_group.addWidget(self.custom_title_filter_button, 0, Qt.AlignVCenter)
+    star_filter_group.addWidget(self.search_box_separator, 0, Qt.AlignVCenter)
+    star_filter_group.setAlignment(Qt.AlignVCenter)
     search_layout.addLayout(star_filter_group)
     self.search_input = QLineEdit()
     self.search_input.setObjectName("searchInput")
@@ -626,7 +676,7 @@ def _build_footer_legacy(self) -> QWidget:
     layout.addWidget(self.active_label)
     layout.addWidget(self.conflict_button)
     layout.addStretch(1)
-    self.save_button = QPushButton(self.style().standardIcon(QStyle.SP_DialogSaveButton), "保 存")
+    self.save_button = QPushButton(self.style().standardIcon(QStyle.SP_DialogSaveButton), "保存")
     self.save_button.setObjectName("primaryButton")
     self.save_button.clicked.connect(self.save_collection)
     layout.addWidget(self.save_button)
@@ -682,7 +732,7 @@ def _build_footer(self) -> QWidget:
     action_layout.addWidget(self.pagination_bar)
     action_layout.addStretch(1)
     action_layout.addWidget(self.toggle_all_button)
-    self.save_button = QPushButton(self.style().standardIcon(QStyle.SP_DialogSaveButton), "保 存")
+    self.save_button = QPushButton(self.style().standardIcon(QStyle.SP_DialogSaveButton), "保存")
     self.save_button.setObjectName("primaryButton")
     self.save_button.clicked.connect(self.save_collection)
     action_layout.addWidget(self.save_button)
@@ -690,21 +740,23 @@ def _build_footer(self) -> QWidget:
     self.save_as_button.setObjectName("secondaryButton")
     self.save_as_button.clicked.connect(self.save_collection_as_new)
     action_layout.addWidget(self.save_as_button)
-    self.launch_button = QPushButton("  启动游戏")
+    self.launch_button = QPushButton("启动游戏")
     self.launch_button.setObjectName("launchButton")
     self.launch_button.setIcon(self._launch_icon())
-    self.launch_button.setIconSize(QSize(ui(20), ui(20)))
+    self.launch_button.setIconSize(QSize(ui(14), ui(14)))
     self.launch_button.clicked.connect(self.launch_game)
     action_layout.addWidget(self.launch_button)
     self._footer_action_buttons = (
         self.toggle_all_button, self.save_button, self.save_as_button, self.launch_button,
     )
+    for button in self._footer_action_buttons:
+        button.setIconSize(QSize(ui(14), ui(14)))
     # 底部四个操作按钮的悬停提示以置顶覆盖层显示在“全部启动”按钮左侧。
     for button in self._footer_action_buttons:
         button.installEventFilter(self)
     # 头部按钮取各自自然宽度、高度统一；底部四个按钮统一使用“启动游戏”
     # 按钮的宽度，保持右下角按钮组等宽（高度同样统一）。
-    action_height = max(ui(1), max(button.minimumSizeHint().height() for button in self._footer_action_buttons) - ui(2))
+    action_height = max(ui(1), max(button.minimumSizeHint().height() for button in self._footer_action_buttons))
     for button in self._header_action_buttons:
         button.setFixedSize(button.minimumSizeHint().width(), action_height)
     launch_width = self.launch_button.minimumSizeHint().width()
@@ -728,7 +780,7 @@ def _apply_style(self) -> None:
     self.setStyleSheet(THEMES.get(self._theme, THEMES["dark"]))
     # Re-evaluate button minimum sizes after the stylesheet has applied;
     # padding and font metrics are part of the real required width.
-    QTimer.singleShot(0, self._sync_content_right_edges)
+    QTimer.singleShot(0, lambda: self._sync_content_right_edges(force=True))
 
 
 def _set_progress_visible(self, visible: bool) -> None:
@@ -743,6 +795,10 @@ def _set_progress_visible(self, visible: bool) -> None:
     self._progress_visible = bool(visible)
     if hasattr(self, "steam_sync_widget"):
         self.steam_sync_widget.setVisible(visible)
+        # Reposition the complete header after the status widget has been
+        # shown; positioning only the status panel can leave it over buttons
+        # during the same layout pass.
+        QTimer.singleShot(0, self._position_header_controls)
     if visible and hasattr(self, "hover_overlay"):
         # 进度条出现时立即收起悬停提示：提示是置顶小窗，会盖住进度条。
         self._clear_header_hint()

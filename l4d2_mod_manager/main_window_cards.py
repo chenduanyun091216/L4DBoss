@@ -200,6 +200,7 @@ def on_category_mode_switch_changed(self, checked: bool) -> None:
 
 def refresh_cards(self) -> None:
     self._content_mode = "mods"
+    self.refresh_addonlist_pinned_state()
     self._cards_render_token += 1
     self._cards_ready_for_reflow = False
     self._show_cards_loading()
@@ -283,6 +284,7 @@ def _populate_cards_batch(
             card.show_custom_title_by_default()
             card.set_card_width(card_width)
         card.set_collection_context(self.collection_names_for(mod.id), self._selected_collection_names)
+        card.set_addonlist_pinned(bool(getattr(mod, "addonlist_pinned", False)))
         self._card_widgets[mod.id] = card
         self.cards_layout.addWidget(card, index // columns, index % columns, Qt.AlignTop)
         # Reparent through the layout first; showing it earlier would make
@@ -363,7 +365,7 @@ def _change_card_size(self, delta: int) -> None:
     self.card_size_increase.setToolTip(f"放大卡片（{size_text}）")
     if hasattr(self, "cards_layout") and self._content_mode == "mods" and self._cards_ready_for_reflow:
         self._reflow_cards()
-        self._sync_content_right_edges(force=True)
+        self._reposition_custom_mod_button()
     # Keep queued scrollbar/layout callbacks from moving the controls
     # immediately after a card-size click. A newer click extends this
     # quiet period through the token check.
@@ -464,11 +466,6 @@ def _schedule_cards_refresh(self, *_args) -> None:
 def _refresh_cards_after_layout(self) -> None:
     self._card_refresh_pending = False
     self._reflow_cards()
-    # 每次 resize 触发的卡片重排之后都要（合并地）重新对齐工具栏/底部
-    # 按钮到卡片网格右缘。窗口最大化/还原的过渡期会连续产生 resize 事件，
-    # 最后一次 16ms 重排可能晚于窗口状态对齐定时器（0/60/180ms）才执行；
-    # 没有这一步，对齐会停在旧位置上，且之后没有事件再触发纠正。
-    self._schedule_content_alignment()
 
 
 def _reflow_cards(self) -> None:
@@ -505,6 +502,12 @@ def _reflow_cards(self) -> None:
 
 def _sync_content_right_edges(self, force: bool = False) -> None:
     """Make controls end exactly where the visible card viewport ends."""
+    # Widths are intentionally stable during ordinary resizing, card-size
+    # changes, and filtering.  Only the initial show and an explicit normal /
+    # maximized transition are allowed to recalculate the geometry.
+    if not force:
+        self._content_alignment_pending = False
+        return
     if getattr(self, "_suppress_content_alignment", False) and not force:
         return
     self._content_alignment_pending = False
@@ -544,7 +547,8 @@ def _sync_content_right_edges(self, force: bool = False) -> None:
         control_width = self.card_width(self.card_columns())
         grid_gap = self.cards_layout.horizontalSpacing()
         self._filter_controls.setSpacing(grid_gap)
-        self.collection_combo.setFixedWidth(control_width)
+        combo_width = control_width
+        self.collection_combo.setFixedWidth(combo_width)
         # The search box spans exactly two card columns (including the gap
         # between them) and the combo occupies the last card column, so the
         # whole filter row stays right-aligned to the card grid and grows
@@ -554,21 +558,15 @@ def _sync_content_right_edges(self, force: bool = False) -> None:
             bar_gap = self.content_bar.layout().spacing()
             filter_gap = self._filter_controls.spacing()
             search_width = 2 * control_width + grid_gap
-            search_left = grid_right - control_width - filter_gap - search_width
-            # Keep the left-side title readable: when the cards are enlarged
-            # so far that the two-column search would cover the title, shrink
-            # the search box instead of letting it overlap the text.
+            search_left = grid_right - combo_width - filter_gap - search_width
             title_width = search_left - content_left - bar_gap
-            title_min = ui(150)
-            if title_width < title_min:
-                search_width = max(ui(1), search_width - (title_min - title_width))
-                title_width = title_min
             self.content_title_host.setFixedWidth(max(ui(1), title_width))
-            self.search_box.setFixedWidth(max(ui(1), search_width))
+            self.search_box.setFixedWidth(search_width)
             self._filter_controls.invalidate()
             self.content_bar.layout().invalidate()
             self.content_bar.layout().activate()
             self._filter_controls.activate()
+            self._position_header_controls(search_width, combo_width)
     if hasattr(self, "_footer_action_buttons") and hasattr(self, "_header_action_buttons"):
         grid_gap = self.cards_layout.horizontalSpacing()
         self.action_host.layout().setSpacing(grid_gap)
@@ -579,9 +577,11 @@ def _sync_content_right_edges(self, force: bool = False) -> None:
         action_height = max(ui(1), max(
             max(button.minimumSizeHint().height() for button in header_buttons),
             max(button.minimumSizeHint().height() for button in footer_buttons),
-        ) - ui(2))
+        ))
         for button in header_buttons:
-            button.setFixedSize(button.minimumSizeHint().width(), action_height)
+            # Width is assigned above from the search-field geometry.  Do
+            # not replace it with text-dependent minimum widths here.
+            button.setFixedSize(button.width(), action_height)
         launch_width = self.launch_button.minimumSizeHint().width()
         for button in footer_buttons:
             button.setFixedSize(launch_width, action_height)
@@ -591,6 +591,7 @@ def _sync_content_right_edges(self, force: bool = False) -> None:
         # The footer itself extends to the app edge, so include that outer
         # gutter as well when aligning its final action to the viewport.
         self.action_host.layout().setContentsMargins(ui(16), 0, ui(8) + inset, 0)
+    self._reposition_custom_mod_button()
     # 按钮位置调整后，让置顶提示跟随锚点按钮重新定位。
     if (
         getattr(self, "hover_overlay", None) is not None
@@ -598,6 +599,72 @@ def _sync_content_right_edges(self, force: bool = False) -> None:
         and getattr(self, "_hover_anchor", None) is not None
     ):
         self._show_hover_hint(self._hover_text, self._hover_anchor)
+
+
+def _reposition_custom_mod_button(self) -> None:
+    """Track the combo's left edge without changing any control widths."""
+    if not all(hasattr(self, name) for name in ("custom_mod_button", "collection_combo", "choose_button")):
+        return
+    header = self.choose_button.parentWidget()
+    if header is None or not self.custom_mod_button.isVisible():
+        return
+    target_x = self.collection_combo.mapToGlobal(QPoint(0, 0)).x()
+    header_pos = header.mapFromGlobal(QPoint(target_x, 0))
+    self.custom_mod_button.move(
+        header_pos.x(), max(0, (header.height() - self.custom_mod_button.height()) // 2)
+    )
+    self.custom_mod_button.raise_()
+
+
+def _position_header_controls(self, search_width: int | None = None, combo_width: int | None = None) -> None:
+    """Place the five header buttons from the settled filter geometry."""
+    if not hasattr(self, "_header_action_buttons"):
+        return
+    header = self.choose_button.parentWidget()
+    if header is None:
+        return
+    search_left = self.search_box.mapToGlobal(QPoint(0, 0)).x()
+    combo_left = self.collection_combo.mapToGlobal(QPoint(0, 0)).x()
+    total = search_width if search_width is not None else self.search_box.width()
+    gap = self.cards_layout.horizontalSpacing() if hasattr(self, "cards_layout") else ui(11)
+    button_width = max(ui(60), (total - 3 * gap) // 4)
+    y = max(0, (header.height() - self.choose_button.height()) // 2)
+    header_left = header.mapFromGlobal(QPoint(search_left, 0)).x()
+    for index, button in enumerate(self._header_action_buttons):
+        button.setFixedWidth(button_width)
+        button.move(header_left + index * (button_width + gap), y)
+        button.raise_()
+    custom_pos = header.mapFromGlobal(QPoint(combo_left, 0)).x()
+    self.custom_mod_button.setFixedHeight(self.choose_button.height())
+    self.custom_mod_button.move(
+        custom_pos, max(0, (header.height() - self.custom_mod_button.height()) // 2)
+    )
+    self.custom_mod_button.raise_()
+    self._position_header_status_widgets()
+
+
+def _position_header_status_widgets(self) -> None:
+    """Place transient header status widgets left of the action group."""
+    if not hasattr(self, "choose_button"):
+        return
+    header = self.choose_button.parentWidget()
+    if header is None:
+        return
+    choose_left = self.choose_button.mapToGlobal(QPoint(0, 0)).x()
+    for widget in (
+        getattr(self, "pin_status_widget", None),
+        getattr(self, "steam_sync_widget", None),
+    ):
+        if widget is None or not widget.isVisible():
+            continue
+        widget.adjustSize()
+        widget.setFixedHeight(self.choose_button.height())
+        width = max(ui(1), widget.sizeHint().width())
+        widget.setFixedWidth(width)
+        choose_left -= width + ui(10)
+        pos = header.mapFromGlobal(QPoint(choose_left, 0))
+        widget.move(pos.x(), max(0, (header.height() - widget.height()) // 2))
+        widget.raise_()
 
 
 def _schedule_window_state_alignment(self) -> None:
@@ -613,7 +680,7 @@ def _align_window_state(self, token: int) -> None:
         return
     if self._content_mode == "mods" and self._cards_ready_for_reflow:
         self._reflow_cards()
-    self._sync_content_right_edges()
+    self._sync_content_right_edges(force=True)
 
 
 def _schedule_content_alignment(self, *_args) -> None:

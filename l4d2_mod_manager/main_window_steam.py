@@ -113,7 +113,7 @@ def on_steam_cancelled(self) -> None:
 
 
 def _reset_steam_sync_controls(self) -> None:
-    self.fetch_button.setText("同步 Steam")
+    self.fetch_button.setText("同步Steam")
     self.fetch_button.setIcon(self.style().standardIcon(QStyle.SP_ArrowDown))
     self.fetch_button.setEnabled(True)
 

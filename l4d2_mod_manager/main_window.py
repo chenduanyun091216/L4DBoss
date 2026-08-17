@@ -43,7 +43,9 @@ class MainWindow(QMainWindow):
         self.setWindowIcon(QIcon(str(TITLE_ICON)))
         self.setWindowTitle("L4D2 Boss · 求生之路 2 Mod 管理器")
         self.resize(ui(1250), ui(730))
-        self.setMinimumSize(ui(1020), ui(680))
+        # The default window is also the lower bound.  This keeps the header,
+        # filter row, and card grid from entering an unusable compressed state.
+        self.setMinimumSize(ui(1250), ui(730))
         self.storage = AppStorage(USER_DATA_ROOT)
         self.settings = self.storage.load_settings()
         self._theme = self.settings.get("theme", "dark")
@@ -174,12 +176,14 @@ class MainWindow(QMainWindow):
             getattr(self, "launch_button", None): "启动游戏：启动游戏 L4D",
         }
         if source is getattr(self, "search_input", None) and getattr(self, "search_box", None) is not None:
-            # 搜索框容器跟随输入框焦点切换“聚焦”样式。
+            # 搜索框容器跟随输入框焦点切换"聚焦"样式。
             if event.type() in (QEvent.FocusIn, QEvent.FocusOut):
                 self.search_box.setProperty("focused", event.type() == QEvent.FocusIn)
                 self.search_box.style().unpolish(self.search_box)
                 self.search_box.style().polish(self.search_box)
                 self.search_box.update()
+        if source is getattr(self, "custom_mod_button", None):
+            hints[source] = "创建mod：配置武器和近战参数、保存预设或生成Mod"
         if source in hints:
             is_footer = source in getattr(self, "_footer_action_buttons", ())
             if event.type() == QEvent.Enter:
@@ -319,6 +323,9 @@ from .main_window_cards import (
     _refresh_cards_after_layout,
     _reflow_cards,
     _sync_content_right_edges,
+    _reposition_custom_mod_button,
+    _position_header_controls,
+    _position_header_status_widgets,
     _schedule_window_state_alignment,
     _align_window_state,
     _schedule_content_alignment,
@@ -357,6 +364,9 @@ MainWindow._schedule_cards_refresh = _schedule_cards_refresh
 MainWindow._refresh_cards_after_layout = _refresh_cards_after_layout
 MainWindow._reflow_cards = _reflow_cards
 MainWindow._sync_content_right_edges = _sync_content_right_edges
+MainWindow._reposition_custom_mod_button = _reposition_custom_mod_button
+MainWindow._position_header_controls = _position_header_controls
+MainWindow._position_header_status_widgets = _position_header_status_widgets
 MainWindow._schedule_window_state_alignment = _schedule_window_state_alignment
 MainWindow._align_window_state = _align_window_state
 MainWindow._schedule_content_alignment = _schedule_content_alignment
@@ -407,6 +417,9 @@ MainWindow._activate_mod_with_dependency_check = _activate_mod_with_dependency_c
 MainWindow._deactivate_mod_with_dependency_check = _deactivate_mod_with_dependency_check
 MainWindow._set_mods_active = _set_mods_active
 
+from .custom_mod_page import open_custom_mod_page
+MainWindow.open_custom_mod_dialog = open_custom_mod_page
+
 from .main_window_collections import (
     collection_names_for,
     add_mod_to_collection,
@@ -431,6 +444,11 @@ from .main_window_collections import (
     save_collection_as_new,
     confirm_save_collection,
     write_addonlist,
+    pin_mod_to_addonlist,
+    unpin_mod_from_addonlist,
+    refresh_addonlist_pinned_state,
+    _after_pin_change,
+    show_pin_status,
 )
 
 MainWindow.collection_names_for = collection_names_for
@@ -456,6 +474,11 @@ MainWindow.save_collection = save_collection
 MainWindow.save_collection_as_new = save_collection_as_new
 MainWindow.confirm_save_collection = confirm_save_collection
 MainWindow.write_addonlist = write_addonlist
+MainWindow.pin_mod_to_addonlist = pin_mod_to_addonlist
+MainWindow.unpin_mod_from_addonlist = unpin_mod_from_addonlist
+MainWindow.refresh_addonlist_pinned_state = refresh_addonlist_pinned_state
+MainWindow._after_pin_change = _after_pin_change
+MainWindow.show_pin_status = show_pin_status
 
 from .main_window_steam import (
     sync_single_mod_steam,
@@ -486,8 +509,8 @@ from .main_window_conflicts import (
     _build_conflict_group_section,
     _show_completed_conflict_report,
     _rebuild_conflict_group_section,
-    pin_conflict_mod,
-    unpin_conflict_mod,
+    _rebuild_conflict_report_after_pin,
+    _show_conflict_toast,
     disable_conflict_mod,
 )
 
@@ -497,12 +520,13 @@ MainWindow._add_conflict_report_group = _add_conflict_report_group
 MainWindow._build_conflict_group_section = _build_conflict_group_section
 MainWindow._show_completed_conflict_report = _show_completed_conflict_report
 MainWindow._rebuild_conflict_group_section = _rebuild_conflict_group_section
-MainWindow.pin_conflict_mod = pin_conflict_mod
-MainWindow.unpin_conflict_mod = unpin_conflict_mod
+MainWindow._rebuild_conflict_report_after_pin = _rebuild_conflict_report_after_pin
+MainWindow._show_conflict_toast = _show_conflict_toast
 MainWindow.disable_conflict_mod = disable_conflict_mod
 
 from .main_window_details import (
     show_card_context_menu,
+    create_collection_with_mod,
     open_mod_source,
     delete_mod,
     _show_content_widget,
@@ -517,6 +541,7 @@ from .main_window_details import (
 )
 
 MainWindow.show_card_context_menu = show_card_context_menu
+MainWindow.create_collection_with_mod = create_collection_with_mod
 MainWindow.open_mod_source = open_mod_source
 MainWindow.delete_mod = delete_mod
 MainWindow._show_content_widget = _show_content_widget

@@ -44,7 +44,7 @@ def on_worker_failed(self, message: str) -> None:
 
 
 def set_busy(self, busy: bool, message: str = "") -> None:
-    for button in (self.choose_button, self.refresh_button, self.fetch_button, self.toggle_all_button, self.save_button, self.save_as_button, self.launch_button):
+    for button in (self.choose_button, self.refresh_button, self.fetch_button, self.toggle_all_button, self.custom_mod_button, self.save_button, self.save_as_button, self.launch_button):
         button.setEnabled(not busy)
     self.fetch_button.setEnabled(not busy and not self.steam_sync_in_progress)
 
@@ -68,6 +68,15 @@ def resizeEvent(self, event) -> None:
         self._cards_loading_overlay.raise_()
     if hasattr(self, "cards_layout"):
         self._schedule_cards_refresh()
+    # Resizing changes the combo's position; follow it without recalculating
+    # any button or filter widths.
+    if hasattr(self, "custom_mod_button"):
+        QTimer.singleShot(20, self._reposition_custom_mod_button)
+    # A window resize changes the card column width. Recalculate the filter
+    # widths after Qt has settled the viewport; card-size buttons do not emit
+    # this main-window resize path, so their toolbar widths remain stable.
+    if hasattr(self, "cards_layout"):
+        QTimer.singleShot(30, lambda: self._sync_content_right_edges(force=True))
     # 窗口尺寸变化时，让置顶提示跟随锚点按钮重新定位。
     if (
         getattr(self, "hover_overlay", None) is not None

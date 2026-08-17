@@ -198,7 +198,7 @@ class HintOverlay(QWidget):
         self.box = QFrame(self)
         self.box.setObjectName("hoverHintBox")
         box_layout = QHBoxLayout(self.box)
-        box_layout.setContentsMargins(ui(14), ui(9), ui(14), ui(9))
+        box_layout.setContentsMargins(ui(14), ui(3), ui(14), ui(3))
         # 宽度完全由提示文字内容决定（max_width=0 表示不设上限，
         # 文字多宽提示框就多宽，不做省略号截断）。
         self.label = SingleLineElidedLabel("", max_width=0)
@@ -219,6 +219,10 @@ class HintOverlay(QWidget):
         self.resize(width, height)
 
     def show_near(self, anchor_global: QPoint, anchor_height: int) -> None:
+        # Match the hovered button exactly; the compact vertical padding keeps
+        # the single-line hint readable at the same height.
+        self.setFixedHeight(anchor_height)
+        self.box.setFixedHeight(anchor_height)
         x = anchor_global.x() - self.width() - ui(8)
         x = max(4, x)
         y = anchor_global.y() + (anchor_height - self.height()) // 2
@@ -447,6 +451,13 @@ class ModCard(CustomTitleMixin, QFrame):
         title = TwoLineElidedLabel("")
         title.setObjectName("cardTitle")
         self._setup_custom_title(preview, title)
+        self._pin_icon = QLabel("📌", preview)
+        self._pin_icon.setObjectName("cardPinnedIcon")
+        self._pin_icon.setFixedSize(ui(22), ui(22))
+        self._pin_icon.setAlignment(Qt.AlignCenter)
+        self._pin_icon.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        self.set_addonlist_pinned(bool(getattr(self.mod, "addonlist_pinned", False)))
+        self._layout_pinned_icon()
         # Two Chinese/English title lines need enough line-height to avoid the
         # second line being clipped; metadata then flows beneath the full title.
         # 40px gives two 13px lines comfortable headroom so descenders on the
@@ -509,7 +520,7 @@ class ModCard(CustomTitleMixin, QFrame):
 
         action_row = QHBoxLayout()
         action_row.setSpacing(ui(6))
-        button = QPushButton("禁用 Mod" if mod.active else "启用 Mod")
+        button = QPushButton("禁用Mod" if mod.active else "启用Mod")
         button.setObjectName("cardActionActive" if mod.active else "cardAction")
         self.toggle_button = button
         button.setFixedHeight(ui(22))
@@ -544,6 +555,7 @@ class ModCard(CustomTitleMixin, QFrame):
         self.preview.setFixedSize(max(1, width - round(ui(20) * scale)), round(ui(112) * scale))
         self._layout_collection_tag()
         self._layout_corner_buttons()
+        self._layout_pinned_icon()
         self.title_label.setFixedHeight(round(ui(40) * scale))
         self.meta_label.setFixedHeight(round(ui(14) * scale))
         self.type_summary_label.setFixedHeight(round(ui(14) * scale))
@@ -695,6 +707,15 @@ class ModCard(CustomTitleMixin, QFrame):
         self.favorite_star = star
         return star
 
+    def _layout_pinned_icon(self) -> None:
+        if not hasattr(self, "_pin_icon"):
+            return
+        self._pin_icon.move(ui(4), ui(4))
+
+    def set_addonlist_pinned(self, pinned: bool) -> None:
+        self._pin_icon.setVisible(pinned)
+        self._pin_icon.setToolTip("当前已置顶到 addonlist.txt 最上方")
+
     def _on_favorite_clicked(self) -> None:
         # Defer the actual toggle to the window handler so the state is flipped
         # exactly once (it also persists and updates this card's star visual).
@@ -740,6 +761,7 @@ class ModCard(CustomTitleMixin, QFrame):
         if getattr(self.preview, "_image_path_key", None) != (self.mod.image_path or ""):
             self.preview.refresh_image(self.mod)
         self._sync_custom_title()
+        self.set_addonlist_pinned(bool(getattr(self.mod, "addonlist_pinned", False)))
         # Remove the dynamic tag widgets but never delete the persistent
         # favorite star: it is re-added below and a queued deleteLater on it
         # would free a widget still referenced by the layout (use-after-free
@@ -766,7 +788,7 @@ class ModCard(CustomTitleMixin, QFrame):
         self.tags_layout.addStretch(1)
         if self.favorite_star.parent() is not self.tags_layout:
             self.tags_layout.addWidget(self.favorite_star)
-        self.toggle_button.setText("禁用 Mod" if self.mod.active else "启用 Mod")
+        self.toggle_button.setText("禁用Mod" if self.mod.active else "启用Mod")
         self.toggle_button.setObjectName("cardActionActive" if self.mod.active else "cardAction")
         self.set_favorite(self.mod.favorite)
         # objectName 变化会影响子控件的后代选择器（如 #modCardActive #cardTitle），
@@ -1057,32 +1079,29 @@ class LegacyConflictCard(QFrame):
         peer_row.addStretch(1)
         layout.addLayout(peer_row)
 class ConflictCard(CustomTitleMixin, QFrame):
-    """Compact conflict item. Single-clicking pins the Mod to the top of its
-    conflict group (higher priority in addonlist.txt); double-clicking
-    disables the represented Mod."""
+    """Compact conflict item. Right-click opens the shared card menu; double-click disables it."""
     disable_requested = pyqtSignal(str)
-    pin_requested = pyqtSignal(str)
     context_requested = pyqtSignal(str, object)
     custom_title_changed = pyqtSignal(str, str)
 
     def __init__(self, mod: Mod, width: int | None = None):
         super().__init__()
         self.mod = mod
-        card_width = width or ui(208)
-        pinned = mod.conflict_pin > 0
-        self.setObjectName("conflictCardPinned" if pinned else "conflictCard")
+        card_width = width or ModCard.BASE_WIDTH
+        scale = card_width / ModCard.BASE_WIDTH
+        card_height = max(ui(190), round(ModCard.BASE_HEIGHT * scale) + 2)
+        self.setObjectName("conflictCard")
         self.setCursor(Qt.PointingHandCursor)
-        self.setFixedSize(card_width, ui(250))
+        self.setFixedSize(card_width, card_height)
         self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         # 单击（置顶）与双击（禁用）通过定时器区分：先延迟派发单击，
         # 双击发生时取消，避免双击禁用前先触发一次置顶。
         self._pin_timer = QTimer(self)
         self._pin_timer.setSingleShot(True)
-        self._pin_timer.timeout.connect(self._emit_pin_request)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(ui(10), ui(10), ui(10), ui(10))
         layout.setSpacing(ui(5))
-        preview = HoverPreview(mod, card_width - ui(20), ui(78), self)
+        preview = HoverPreview(mod, card_width - round(ui(20) * scale), round(ui(112) * scale), self)
         preview.setObjectName("conflictPreview")
         self.preview = preview
         layout.addWidget(preview)
@@ -1091,6 +1110,17 @@ class ConflictCard(CustomTitleMixin, QFrame):
         # 13px 两行文字（含 1.32 行高）约需 34px，40px 保证第二行不被裁切。
         title.setFixedHeight(ui(40))
         self._setup_custom_title(preview, title)
+        # Keep the report visually consistent with library cards: a Mod that
+        # is pinned to the top of addonlist.txt gets the same red pin on its
+        # preview, without competing with the conflict-count badge.
+        self._pin_icon = QLabel("📌", preview)
+        self._pin_icon.setObjectName("cardPinnedIcon")
+        self._pin_icon.setFixedSize(ui(22), ui(22))
+        self._pin_icon.setAlignment(Qt.AlignCenter)
+        self._pin_icon.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        self._pin_icon.move(ui(4), ui(4))
+        self._pin_icon.setToolTip("当前已置顶到 addonlist.txt 最上方")
+        self._pin_icon.setVisible(bool(getattr(self.mod, "addonlist_pinned", False)))
         title_row = QHBoxLayout()
         title_row.setContentsMargins(0, 0, 0, 0)
         title_row.setSpacing(ui(6))
@@ -1098,7 +1128,7 @@ class ConflictCard(CustomTitleMixin, QFrame):
         conflict_count = len(mod.conflict_with)
         count_badge = QLabel(str(conflict_count))
         count_badge.setObjectName("conflictCountBadge")
-        count_badge.setFixedSize(ui(24), ui(24))
+        count_badge.setFixedSize(ui(20), ui(20))
         count_badge.setAlignment(Qt.AlignCenter)
         count_badge.setToolTip(f"Conflicts with {conflict_count} enabled Mod(s)")
         title_row.addWidget(count_badge, 0, Qt.AlignTop)
@@ -1114,17 +1144,16 @@ class ConflictCard(CustomTitleMixin, QFrame):
         tags = QHBoxLayout()
         tags.setSpacing(ui(5))
         tags.addWidget(make_tag("冲突", "#b84752"))
-        if pinned:
-            pin_tag = make_tag("置顶", "#c9a227")
-            pin_tag.setToolTip("该 Mod 已置顶：冲突组内排在最前，addonlist.txt 中优先被游戏读取")
-            tags.addWidget(pin_tag)
         tags.addWidget(make_tag_button("STEAM" if mod.steam_loaded and mod.workshop_id else "本地", "#365f9f" if mod.steam_loaded and mod.workshop_id else "#526073", "打开来源", self.open_source))
         tags.addStretch(1)
         layout.addLayout(tags)
         hint = QLabel("单击置顶优先 · 双击禁用")
         hint.setObjectName("conflictCaption")
+        hint.setText("右键管理置顶 · 双击禁用")
+        hint.setToolTip("右键：使用与普通卡片相同的置顶/取消置顶；双击：禁用该 Mod")
         hint.setToolTip("单击：将该 Mod 置顶为冲突组首位（addonlist.txt 中优先加载）；双击：禁用该 Mod")
         layout.addWidget(hint)
+        hint.setToolTip("右键：使用与普通卡片相同的置顶/取消置顶；双击：禁用该 Mod")
 
     def open_source(self) -> None:
         if self.mod.steam_loaded and self.mod.workshop_id:
@@ -1135,7 +1164,8 @@ class ConflictCard(CustomTitleMixin, QFrame):
                 QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
 
     def _emit_pin_request(self) -> None:
-        self.pin_requested.emit(self.mod.id)
+        # Kept as a harmless compatibility no-op for the old delayed-click path.
+        return
 
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.LeftButton:
@@ -1159,10 +1189,11 @@ class ConflictCard(CustomTitleMixin, QFrame):
         self.context_requested.emit(self.mod.id, event.globalPos())
         event.accept()
 def conflict_group_sort_key(mod: Mod):
-    """冲突组内排序键：置顶的 Mod（conflict_pin 值越大越新）排在最前，
-    其余按冲突数从多到少、名称排序。冲突报告与 addonlist.txt 共用，
-    保证两者顺序一致（置顶 Mod 在文件中同样靠前，被游戏优先读取）。"""
-    return (-mod.conflict_pin, -len(mod.conflict_with), mod.title.casefold())
+    """冲突组内排序键：被置顶的 Mod（addonlist_pinned）排在最前，其余按
+    冲突数从多到少、名称排序。冲突报告与 addonlist.txt 共用，保证两者
+    顺序一致（置顶 Mod 在文件中同样靠前，被游戏优先读取）。"""
+    pinned = bool(getattr(mod, "addonlist_pinned", False))
+    return (0 if pinned else 1, -len(mod.conflict_with), mod.title.casefold())
 
 
 class ConflictDialog(QDialog):

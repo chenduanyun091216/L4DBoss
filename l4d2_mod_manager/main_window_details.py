@@ -41,8 +41,29 @@ def show_card_context_menu(self, mod_id: str, global_pos) -> None:
     mod = self.mods.get(mod_id)
     if mod is None:
         return
+    pinned_ids = set(self.settings.get("addonlist_pinned_mod_ids", []))
+    if mod_id in pinned_ids:
+        pin_action = menu.addAction("取消置顶")
+        pin_action.setToolTip("取消该卡片的置顶，并恢复它在 addonlist.txt 中的普通顺序")
+        pin_action.triggered.connect(lambda: QTimer.singleShot(0, lambda: self.unpin_mod_from_addonlist(mod_id)))
+    else:
+        pin_action = menu.addAction("置顶")
+        pin_action.setToolTip("将该卡片置顶；多个置顶 Mod 会依次排在 addonlist.txt 最前方")
+        pin_action.triggered.connect(lambda: QTimer.singleShot(0, lambda: self.pin_mod_to_addonlist(mod_id)))
+    menu.addSeparator()
     details_action = menu.addAction("查看详细信息")
-    details_action.triggered.connect(lambda: self.show_mod_details(mod))
+
+    def open_details() -> None:
+        # _show_content_widget snapshots the currently visible page.  When a
+        # detail view is opened from the conflict report that snapshot is the
+        # report itself, not the regular card list, so remember the intended
+        # destination explicitly for the back button.
+        self._return_to_conflicts = (
+            self._content_mode == "detail" and hasattr(self, "_conflict_report_context")
+        )
+        self.show_mod_details(mod)
+
+    details_action.triggered.connect(open_details)
     source_action = menu.addAction("查看源文件")
     source_action.setToolTip("打开该 Mod 所在文件夹")
     source_action.triggered.connect(lambda: self.open_mod_source(mod))
@@ -52,19 +73,14 @@ def show_card_context_menu(self, mod_id: str, global_pos) -> None:
     dep_action = menu.addAction("管理依赖…")
     dep_action.setToolTip("设置该 Mod 依赖的其他 Mod；启用时会提示一并启用")
     dep_action.triggered.connect(lambda: self.manage_dependencies(mod_id))
-    if mod.active and mod.conflict_with:
-        if mod.conflict_pin > 0:
-            unpin_action = menu.addAction("取消置顶")
-            unpin_action.setToolTip("取消该 Mod 的置顶，恢复冲突组内的默认排序")
-            unpin_action.triggered.connect(lambda: self.unpin_conflict_mod(mod_id))
-        else:
-            pin_action = menu.addAction("置顶该 Mod（冲突优先）")
-            pin_action.setToolTip("将该 Mod 置顶为冲突组首位；生成 addonlist.txt 时同样排在最前，被游戏优先读取")
-            pin_action.triggered.connect(lambda: self.pin_conflict_mod(mod_id))
     delete_action = menu.addAction("删除 Mod")
     delete_action.setToolTip("删除该 Mod 文件及其关联预览图片")
     delete_action.triggered.connect(lambda: self.delete_mod(mod_id))
-    add_menu = menu.addMenu("加入已保存的组合")
+    add_menu = menu.addMenu("加入组合")
+    new_action = add_menu.addAction("新建组合…")
+    new_action.setToolTip("创建一个新组合，并把当前 Mod 加入其中")
+    new_action.triggered.connect(lambda: self.create_collection_with_mod(mod_id))
+    add_menu.addSeparator()
     existing = set(self.collection_names_for(mod_id))
     if not self.collections:
         action = add_menu.addAction("暂无组合，请先保存当前组合")
@@ -84,6 +100,25 @@ def show_card_context_menu(self, mod_id: str, global_pos) -> None:
             action = add_menu.addAction(collection.name)
             action.triggered.connect(lambda _=False, name=collection.name: self.add_mod_to_collection(mod_id, name))
     menu.exec_(global_pos)
+
+
+def create_collection_with_mod(self, mod_id: str) -> None:
+    """Prompt for a new collection name and add the given Mod to it."""
+    name, ok = QInputDialog.getText(self, "新建组合", "组合名称：")
+    if not ok or not name.strip():
+        return
+    name = name.strip()
+    if any(collection.name == name for collection in self.collections):
+        QMessageBox.warning(self, "无法创建", f"组合「{name}」已存在，请换一个名称。")
+        return
+    collection = ModCollection(name=name, mod_ids=[mod_id])
+    self.collections.append(collection)
+    self.storage.save_collections(self.collections)
+    self.sync_collection_in_background(collection)
+    self.refresh_collection_combo()
+    card = self._card_widgets.get(mod_id) or self._card_cache.get(mod_id)
+    if card is not None:
+        card.set_collection_context(self.collection_names_for(mod_id), self._selected_collection_names)
 
 @staticmethod
 
@@ -181,7 +216,7 @@ def show_mod_details(self, mod: Mod) -> None:
         field.setTextInteractionFlags(Qt.TextSelectableByMouse)
         info.addWidget(field)
     if mod.steam_loaded and mod.workshop_id:
-        steam_link = QPushButton("在 Steam 创意工坊中查看")
+        steam_link = QPushButton("在Steam创意工坊中查看")
         steam_link.setObjectName("steamDetailsLink")
         steam_link.setIcon(self.style().standardIcon(QStyle.SP_BrowserReload))
         steam_link.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(f"https://steamcommunity.com/sharedfiles/filedetails/?id={mod.workshop_id}")))
@@ -215,7 +250,16 @@ def show_mod_details(self, mod: Mod) -> None:
 
 
 def show_mod_list(self) -> None:
+    if self._content_mode == "custom":
+        self._content_mode = "detail"
+        self.show_mod_list()
+        self.scan_mods(True)
+        return
     if self._content_mode != "detail":
+        return
+    if getattr(self, "_return_to_conflicts", False):
+        self._return_to_conflicts = False
+        self.show_conflicts()
         return
     snapshot = getattr(self, "_list_snapshot", None)
     saved_cards = getattr(self, "_saved_card_widgets", [])
@@ -252,7 +296,8 @@ def show_mod_list(self) -> None:
     self.search_box.show()
     self.collection_combo.show()
     self._update_pagination(len(self.filtered_mods()), max(1, (len(self.filtered_mods()) + self.page_size - 1) // self.page_size))
-    self._sync_content_right_edges()
+    # Keep the already-established toolbar widths when returning to the list.
+    # They are recalculated only on initial show or window-state transitions.
     scroll_position = getattr(self, "_list_scroll_position", 0)
     QTimer.singleShot(0, lambda: self.scroll.verticalScrollBar().setValue(scroll_position))
 
