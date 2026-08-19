@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 from .models import Mod, ModCollection
@@ -67,4 +68,16 @@ class AppStorage:
 
     @staticmethod
     def _write_json(path: Path, data) -> None:
-        path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = path.with_name(f".{path.name}.tmp")
+        try:
+            with temp_path.open("w", encoding="utf-8", newline="\n") as handle:
+                json.dump(data, handle, ensure_ascii=False, indent=2)
+                handle.flush()
+                os.fsync(handle.fileno())
+            temp_path.replace(path)
+        finally:
+            try:
+                temp_path.unlink(missing_ok=True)
+            except OSError:
+                pass

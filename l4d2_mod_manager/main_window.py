@@ -493,6 +493,7 @@ from .main_window_steam import (
     on_steam_finished,
     on_steam_failed,
     cancel_steam_sync,
+    _set_steam_stop_mode,
     on_steam_cancelled,
     _reset_steam_sync_controls,
     _set_steam_sync_status,
@@ -504,6 +505,7 @@ MainWindow.sync_single_mod_steam = sync_single_mod_steam
 MainWindow.on_steam_finished = on_steam_finished
 MainWindow.on_steam_failed = on_steam_failed
 MainWindow.cancel_steam_sync = cancel_steam_sync
+MainWindow._set_steam_stop_mode = _set_steam_stop_mode
 MainWindow.on_steam_cancelled = on_steam_cancelled
 MainWindow._reset_steam_sync_controls = _reset_steam_sync_controls
 MainWindow._set_steam_sync_status = _set_steam_sync_status
@@ -521,6 +523,7 @@ from .main_window_conflicts import (
     _conflict_priority_ids,
     _on_conflict_group_reordered,
     _show_conflict_toast,
+    _hide_conflict_toast,
     disable_conflict_mod,
 )
 
@@ -534,6 +537,7 @@ MainWindow._rebuild_conflict_report_after_pin = _rebuild_conflict_report_after_p
 MainWindow._conflict_priority_ids = _conflict_priority_ids
 MainWindow._on_conflict_group_reordered = _on_conflict_group_reordered
 MainWindow._show_conflict_toast = _show_conflict_toast
+MainWindow._hide_conflict_toast = _hide_conflict_toast
 MainWindow.disable_conflict_mod = disable_conflict_mod
 
 from .main_window_details import (

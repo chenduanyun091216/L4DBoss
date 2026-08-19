@@ -239,9 +239,15 @@ def _show_conflict_toast(self, message: str) -> None:
     if getattr(self, "_conflict_toast_timer", None) is None:
         self._conflict_toast_timer = QTimer(self)
         self._conflict_toast_timer.setSingleShot(True)
+        self._conflict_toast_timer.timeout.connect(self._hide_conflict_toast)
     self._conflict_toast_timer.stop()
-    self._conflict_toast_timer.timeout.connect(lambda: target.setVisible(False))
     self._conflict_toast_timer.start(3200)
+
+
+def _hide_conflict_toast(self) -> None:
+    target = getattr(self, "content_toast", None)
+    if target is not None:
+        target.setVisible(False)
 
 
 def disable_conflict_mod(self, mod_id: str) -> None:

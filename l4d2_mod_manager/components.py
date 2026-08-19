@@ -16,10 +16,10 @@ from copy import deepcopy
 from pathlib import Path
 from threading import Event
 
-from PyQt5.QtCore import QEvent, QMimeData, QObject, QPoint, QRect, QRunnable, QSize, QTimer, QUrl, Qt, QThreadPool, pyqtSignal
-from PyQt5.QtGui import QColor, QDesktopServices, QDrag, QFont, QIcon, QLinearGradient, QPainter, QPixmap
+from PyQt5.QtCore import QEvent, QMimeData, QObject, QPoint, QRect, QRunnable, QSize, QStringListModel, QTimer, QUrl, Qt, QThreadPool, pyqtSignal
+from PyQt5.QtGui import QBrush, QColor, QDesktopServices, QDrag, QFont, QGradient, QIcon, QLinearGradient, QPainter, QPen, QPixmap
 from PyQt5.QtWidgets import (
-    QAction, QApplication, QComboBox, QDialog, QFileDialog, QFrame, QGridLayout,
+    QAction, QApplication, QComboBox, QCompleter, QDialog, QFileDialog, QFrame, QGridLayout,
     QHBoxLayout, QInputDialog, QLabel, QLayout, QLineEdit, QMainWindow, QMenu, QMessageBox,
     QAbstractItemView, QProgressBar, QPushButton, QScrollArea, QSizeGrip, QSizePolicy, QSplitter, QStyle,
     QStyledItemDelegate, QStyleOptionViewItem, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget, QWidgetAction,
@@ -27,6 +27,7 @@ from PyQt5.QtWidgets import (
 )
 
 from .categories import (
+    ALL_STD_CATEGORY_IDS,
     CATEGORIES,
     SIMPLE_CATEGORIES,
     collect_all_category_ids,
@@ -35,6 +36,7 @@ from .categories import (
     iter_category_tree,
     simple_categories,
 )
+from . import theme
 from .dependencies import extract_workshop_ids
 from .collection_sync import delete_collection_folder, restore_collection_files, sync_collection_files
 from .models import Mod, ModCollection
@@ -42,7 +44,6 @@ from .steam_client import SteamClient
 from .storage import AppStorage
 from .vpk_scanner import is_conflict_relevant_path, scan_mod_directory
 from .theme import *
-from .components import *
 
 class WorkerSignals(QObject):
     finished = pyqtSignal(object)
@@ -180,6 +181,44 @@ class SingleLineElidedLabel(QLabel):
             super().setText(metrics.elidedText(text, Qt.ElideRight, available))
         else:
             super().setText(text)
+
+
+class AnimatedBrandButton(QPushButton):
+    """Theme-aware brand title with a restrained moving highlight."""
+
+    def __init__(self, text: str, parent=None):
+        super().__init__(text, parent)
+        self._phase = 0.0
+        self._animation = QTimer(self)
+        self._animation.setInterval(55)
+        self._animation.timeout.connect(self._advance_glow)
+        self._animation.start()
+
+    def _advance_glow(self) -> None:
+        self._phase = (self._phase + 0.025) % 1.0
+        self.update()
+
+    def paintEvent(self, _event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setRenderHint(QPainter.TextAntialiasing)
+        rect = self.rect()
+        glow = QColor(theme.theme_color("brand_glow"))
+        glow.setAlpha(70 if self.underMouse() else 42)
+        painter.setPen(QPen(glow, 2))
+        painter.drawText(rect.translated(0, 1), Qt.AlignLeft | Qt.AlignVCenter, self.text())
+
+        width = max(1, rect.width())
+        offset = int(self._phase * width * 2)
+        gradient = QLinearGradient(-width + offset, 0, offset, 0)
+        gradient.setSpread(QGradient.RepeatSpread)
+        gradient.setColorAt(0.0, QColor(theme.theme_color("brand_a")))
+        gradient.setColorAt(0.42, QColor(theme.theme_color("brand_b")))
+        gradient.setColorAt(0.58, QColor(theme.theme_color("brand_c")))
+        gradient.setColorAt(1.0, QColor(theme.theme_color("brand_a")))
+        painter.setPen(QPen(QBrush(gradient), 1))
+        painter.drawText(rect, Qt.AlignLeft | Qt.AlignVCenter, self.text())
+        painter.end()
 
 
 class HintOverlay(QWidget):
@@ -390,7 +429,20 @@ class CustomTitleMixin:
                 dismiss()
             else:
                 combo.hidePopup()
-        available = sorted(set(collect_all_category_ids()) | set(getattr(self.mod, "manual_tags", []) or []))
+        for preview in host_window.findChildren(HoverPreview):
+            preview.dismiss_popup()
+        reusable_custom: set[str] = set()
+        all_mods = getattr(host_window, "mods", {})
+        for known_mod in all_mods.values():
+            reusable_custom.update(
+                tag for tag in (getattr(known_mod, "manual_tags", []) or [])
+                if tag not in ALL_STD_CATEGORY_IDS
+            )
+        available = sorted(
+            set(collect_all_category_ids())
+            | reusable_custom
+            | set(getattr(self.mod, "manual_tags", []) or [])
+        )
         dialog = EditModInfoDialog(self.mod, available, self)
         dialog.mod_info_changed.connect(self.mod_info_changed)
         if dialog.exec_() == QDialog.Accepted and self.mod.id == dialog.mod.id:
@@ -505,12 +557,12 @@ class ModCard(CustomTitleMixin, QFrame):
         layout.addSpacing(ui(2))
         layout.addWidget(meta)
 
-        type_labels = [text for text, _color in mod_type_tags(mod)]
-        type_summary = QLabel(f"tags: {' '.join(type_labels)}" if type_labels else "tags: -")
+        type_summary = QLabel()
         type_summary.setObjectName("typeSummary")
-        type_summary.setToolTip("类型标签：" + ("、".join(type_labels) if type_labels else "暂无"))
+        type_summary.setTextFormat(Qt.RichText)
         type_summary.setFixedHeight(ui(14))
         self.type_summary_label = type_summary
+        self._refresh_type_summary()
         layout.addWidget(type_summary)
 
         star = self._build_favorite_star()
@@ -765,6 +817,24 @@ class ModCard(CustomTitleMixin, QFrame):
             self.style().unpolish(self)
             self.style().polish(self)
 
+    def _refresh_type_summary(self) -> None:
+        effective = effective_tags(self.mod)
+        custom_tags = [tag for tag in effective if tag not in ALL_STD_CATEGORY_IDS]
+        type_labels = [text for text, _color in mod_type_tags(self.mod)]
+        custom_html = " ".join(
+            f'<span style="color:{chip_color(tag, theme.ACTIVE_THEME)}; font-weight:700;">{escape(tag)}</span>'
+            for tag in custom_tags
+        )
+        standard_html = "tags: " + (" ".join(escape(label) for label in type_labels) if type_labels else "-")
+        self.type_summary_label.setText(
+            f"{custom_html}&nbsp;&nbsp;{standard_html}" if custom_html else standard_html
+        )
+        tooltip_parts = []
+        if custom_tags:
+            tooltip_parts.append("自定义标签：" + "、".join(custom_tags))
+        tooltip_parts.append("类型标签：" + ("、".join(type_labels) if type_labels else "暂无"))
+        self.type_summary_label.setToolTip("\n".join(tooltip_parts))
+
     def _add_source_tag(self, layout: QHBoxLayout) -> None:
         if self.mod.steam_loaded and self.mod.workshop_id:
             layout.addWidget(make_tag_button("STEAM", "#365f9f", "打开 Steam 创意工坊页面", self.open_workshop_page))
@@ -797,9 +867,7 @@ class ModCard(CustomTitleMixin, QFrame):
         self._sync_custom_title()
         self.set_addonlist_pinned(bool(getattr(self.mod, "addonlist_pinned", False)))
         # 类型标签跟随用户编辑（增删标签）实时刷新。
-        type_labels = [text for text, _color in mod_type_tags(self.mod)]
-        self.type_summary_label.setText(f"tags: {' '.join(type_labels)}" if type_labels else "tags: -")
-        self.type_summary_label.setToolTip("类型标签：" + ("、".join(type_labels) if type_labels else "暂无"))
+        self._refresh_type_summary()
         # Remove the dynamic tag widgets but never delete the persistent
         # favorite star: it is re-added below and a queued deleteLater on it
         # would free a widget still referenced by the layout (use-after-free
@@ -921,13 +989,19 @@ class HoverPreview(QLabel):
             self._popup.hide()
         super().leaveEvent(event)
 
+    def dismiss_popup(self) -> None:
+        self._hover_timer.stop()
+        if self._popup is not None:
+            self._popup.hide()
+            self._popup.clear()
+
     def _show_large_preview(self) -> None:
         screen = QApplication.desktop().availableGeometry(self)
         max_width = min(ui(560), screen.width() - ui(40))
         max_height = min(ui(420), screen.height() - ui(80))
         pixmap = make_preview_pixmap(self.mod, max_width, max_height)
         if self._popup is None:
-            popup = QLabel(None, Qt.Tool | Qt.FramelessWindowHint)
+            popup = QLabel(self.window(), Qt.Tool | Qt.FramelessWindowHint)
             popup.setAttribute(Qt.WA_TransparentForMouseEvents, True)
             popup.setAttribute(Qt.WA_ShowWithoutActivating, True)
             popup.setAlignment(Qt.AlignCenter)
@@ -1845,7 +1919,7 @@ class MultiSelectComboBox(QComboBox):
         painter.setRenderHint(QPainter.Antialiasing)
         painter.setPen(QColor(theme_color("tree_expand")))
         painter.setFont(QFont("Segoe UI Symbol", max(9, ui(13)), QFont.Bold))
-        painter.translate(0, -ui(1))
+        painter.translate(0, -ui(3))
         painter.drawText(self.rect().adjusted(0, 0, -ui(9), 0), Qt.AlignRight | Qt.AlignVCenter, "⌄")
         painter.end()
 
@@ -2055,6 +2129,8 @@ def make_preview_pixmap(mod: Mod, max_width: int = ui(188), max_height: int = ui
         if not pixmap.isNull():
             result = pixmap.scaled(max_width, max_height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
             PREVIEW_CACHE[cache_key] = result
+            while len(PREVIEW_CACHE) > PREVIEW_CACHE_LIMIT:
+                PREVIEW_CACHE.pop(next(iter(PREVIEW_CACHE)))
             return result
     pixmap = QPixmap(max_width, max_height)
     gradient = QLinearGradient(0, 0, pixmap.width(), pixmap.height())
@@ -2065,6 +2141,8 @@ def make_preview_pixmap(mod: Mod, max_width: int = ui(188), max_height: int = ui
     painter.drawText(pixmap.rect(), Qt.AlignCenter, "L4D2\nMOD")
     painter.end()
     PREVIEW_CACHE[cache_key] = pixmap
+    while len(PREVIEW_CACHE) > PREVIEW_CACHE_LIMIT:
+        PREVIEW_CACHE.pop(next(iter(PREVIEW_CACHE)))
     return pixmap
 def clear_layout(layout) -> None:
     while layout.count():
@@ -2326,6 +2404,14 @@ class FlowLayout(QLayout):
         self.addChildWidget(w)
         self.addItem(QWidgetItem(w))
 
+    def insertWidget(self, index: int, w: QWidget) -> None:
+        self.addChildWidget(w)
+        item = QWidgetItem(w)
+        position = max(0, min(index, len(self._items)))
+        self._items.insert(position, item)
+        self._keepalive.append(w)
+        self.invalidate()
+
     def count(self) -> int:
         return len(self._items)
 
@@ -2389,6 +2475,24 @@ class FlowLayout(QLayout):
         return size
 
 
+class ReusableTagLineEdit(QLineEdit):
+    """Tag editor that exposes known custom tags as soon as it gains focus."""
+
+    def __init__(self, tags: list[str], parent=None):
+        super().__init__(parent)
+        self._tag_model = QStringListModel(sorted(set(tags)), self)
+        self._tag_completer = QCompleter(self._tag_model, self)
+        self._tag_completer.setCaseSensitivity(Qt.CaseInsensitive)
+        self._tag_completer.setCompletionMode(QCompleter.PopupCompletion)
+        self._tag_completer.setFilterMode(Qt.MatchContains)
+        self.setCompleter(self._tag_completer)
+
+    def focusInEvent(self, event) -> None:
+        super().focusInEvent(event)
+        if self._tag_model.rowCount() and not self.text().strip():
+            QTimer.singleShot(0, self._tag_completer.complete)
+
+
 class EditModInfoDialog(QDialog):
     """编辑单个 Mod 的名称与标签。
 
@@ -2403,6 +2507,7 @@ class EditModInfoDialog(QDialog):
         super().__init__(parent)
         self.mod = mod
         self._available = list(available_tags)
+        self._reusable_custom_tags = sorted(tag for tag in self._available if tag not in ALL_STD_CATEGORY_IDS)
         self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setModal(True)
@@ -2464,7 +2569,7 @@ class EditModInfoDialog(QDialog):
 
         add_row = QHBoxLayout()
         add_row.setSpacing(ui(8))
-        self._new_tag_edit = QLineEdit()
+        self._new_tag_edit = ReusableTagLineEdit(self._reusable_custom_tags)
         self._new_tag_edit.setObjectName("promptInput")
         self._new_tag_edit.setPlaceholderText("输入新标签名称，回车添加（归入“其他”分类）")
         self._new_tag_edit.returnPressed.connect(self._add_new_tag)
@@ -2515,13 +2620,17 @@ class EditModInfoDialog(QDialog):
         self._other_group = other_group
         # 任何已有但不属于静态分类树的标签都必须先进入“其他”，否则
         # 它们没有对应的 tree item，也就无法生成上方的当前标签气泡。
-        for tag in effective_list:
+        custom_candidates = sorted(
+            set(self._reusable_custom_tags)
+            | {tag for tag in effective_list if tag not in represented}
+        )
+        for tag in custom_candidates:
             if tag in represented:
                 continue
             item = QTreeWidgetItem(other_group, [tag])
             item.setData(0, Qt.UserRole, tag)
             item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
-            item.setCheckState(0, Qt.Checked)
+            item.setCheckState(0, Qt.Checked if tag in effective else Qt.Unchecked)
         self._tag_tree.blockSignals(False)
 
     def _iter_checkable(self):
@@ -2541,7 +2650,9 @@ class EditModInfoDialog(QDialog):
         if not hasattr(self, "_chip_map"):
             self._chip_map: dict = {}
             self._empty_label = None
-            for it in self._iter_checkable():
+            items = list(self._iter_checkable())
+            items.sort(key=lambda it: (it.data(0, Qt.UserRole) in ALL_STD_CATEGORY_IDS, it.text(0).casefold()))
+            for it in items:
                 chip = self._make_chip(it.text(0), it)
                 self._chips_layout.addWidget(chip)
                 self._chip_map[id(it)] = (it, chip)
@@ -2579,10 +2690,14 @@ class EditModInfoDialog(QDialog):
         return chip
 
     def _style_chip(self, chip: QWidget, cid: str) -> None:
-        bg = chip_color(cid, ACTIVE_THEME)
-        fg = chip_text_color(ACTIVE_THEME)
+        active_theme = theme.ACTIVE_THEME
+        bg = chip_color(cid, active_theme)
+        fg = chip_text_color(active_theme)
+        custom = cid not in ALL_STD_CATEGORY_IDS
+        border = theme.theme_color("tree_favorite") if custom else "transparent"
+        border_width = 2 if custom else 0
         chip.setStyleSheet(
-            f"#editChip {{ background: {bg}; border: none; border-radius: 11px; min-height: 22px; max-height: 22px; }}"
+            f"#editChip {{ background: {bg}; border: {border_width}px solid {border}; border-radius: 11px; min-height: 22px; max-height: 22px; }}"
             f" #editChipText {{ color: {fg}; font-size: 11px; font-weight: 700; }}"
         )
 
@@ -2612,7 +2727,7 @@ class EditModInfoDialog(QDialog):
             self._chip_map = {}
             self._empty_label = None
         chip = self._make_chip(text, item)
-        self._chips_layout.addWidget(chip)
+        self._chips_layout.insertWidget(0, chip)
         self._chip_map[id(item)] = (item, chip)
         self._new_tag_edit.clear()
         self._sync_chips()

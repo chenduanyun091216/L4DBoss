@@ -36,6 +36,7 @@ APP_ROOT = Path(__file__).resolve().parent.parent
 BACKGROUND_IMAGE = APP_ROOT / "files" / "bg.png"
 TITLE_IMAGE = APP_ROOT / "files" / "title.png"
 TITLE_ICON = APP_ROOT / "files" / "title.ico"
+ICON_DIR = APP_ROOT / "files" / "icons"
 # 使用手册（GitHub README）地址，标题右键菜单“使用手册”使用。
 MANUAL_URL = "https://github.com/chenduanyun091216/L4DBoss/blob/main/README.md"
 # Runtime data is kept outside the bundled application so it remains writable
@@ -45,6 +46,7 @@ USER_DATA_ROOT = Path(
 ) / "L4DBoss"
 UI_SCALE = 1.0
 PREVIEW_CACHE: dict[str, QPixmap] = {}
+PREVIEW_CACHE_LIMIT = 256
 
 
 def ui(value: int) -> int:
@@ -81,6 +83,12 @@ THEME_PALETTE: dict[str, dict[str, str]] = {
         "toggle_on_fill": "#2d65d6",
         "toggle_knob": "#f4f8ff",
         "link": "#79a5ff",
+        "brand_a": "#d8e8ff",
+        "brand_b": "#4b8dff",
+        "brand_c": "#83ecff",
+        "brand_glow": "#3f85ff",
+        "brand_credit": "#ffcf57",
+        "input_placeholder": "#b5c7df",
     },
     "light": {
         "surface": "#d9e2f1",
@@ -98,6 +106,12 @@ THEME_PALETTE: dict[str, dict[str, str]] = {
         "toggle_on_fill": "#2d65d6",
         "toggle_knob": "#ffffff",
         "link": "#2d65d6",
+        "brand_a": "#17335f",
+        "brand_b": "#2d65d6",
+        "brand_c": "#ee4f91",
+        "brand_glow": "#4d83eb",
+        "brand_credit": "#df2f76",
+        "input_placeholder": "#667994",
     },
     "titanium": {
         "surface": "#9a9ea4",
@@ -115,6 +129,12 @@ THEME_PALETTE: dict[str, dict[str, str]] = {
         "toggle_on_fill": "#2d65d6",
         "toggle_knob": "#ffffff",
         "link": "#1a3a7e",
+        "brand_a": "#f2f6fc",
+        "brand_b": "#8db8ff",
+        "brand_c": "#64e0c4",
+        "brand_glow": "#76a9ff",
+        "brand_credit": "#ffe066",
+        "input_placeholder": "#526170",
     },
 }
 
@@ -199,7 +219,7 @@ THEMES = {
     #brand { color: #f4f8ff; font-size: 20px; font-weight: 800; letter-spacing: 2px; }
     #brandButton { color: #f4f8ff; background: transparent; border: 0; padding: 0; font-size: 20px; font-weight: 800; letter-spacing: 2px; text-align: left; }
     #brandButton:hover { color: #79a5ff; }
-    #brandCredit { color: #8291a8; font-size: 11px; font-weight: 700; }
+    #brandCredit { color: #ffcf57; font-size: 11px; font-weight: 800; }
     #brandSub, #contentSubtitle { color: #8090a8; font-size: 10px; font-weight: 700; letter-spacing: 1px; }
     #headerHint { color: #a9bbd5; font-size: 11px; font-weight: 600; padding-right: 8px; }
     #hoverOverlay { background: transparent; }
@@ -207,6 +227,7 @@ THEMES = {
     #hoverHintChip { color: #bcd7ff; font-size: 11px; font-weight: 700; }
     #headerButton, #headerButtonSecondary, #primaryButton, #secondaryButton, #launchButton, #toggleAllButton { background: #273347; color: #d9e4f4; border: 1px solid #38465c; border-radius: 7px; padding: 5px 10px; font-size: 13px; font-weight: 700; }
     #headerButton, #headerButtonSecondary { font-size: 10px; }
+    #headerButton[stopMode="true"] { color: #ff5d68; border-color: #ff5d68; font-weight: 800; }
     #primaryButton, #secondaryButton, #launchButton, #toggleAllButton { font-size: 10px; }
     #headerButton:hover, #headerButtonSecondary:hover, #primaryButton:hover, #secondaryButton:hover, #launchButton:hover, #toggleAllButton:hover { background: #3a5378; color: white; border: 2px solid #6aa0ff; }
     #headerIconButton { background: #202c40; border: 0; border-radius: 7px; padding: 0; }
@@ -467,7 +488,7 @@ THEMES = {
     #brand { color: #1f2c44; font-size: 20px; font-weight: 800; letter-spacing: 2px; }
     #brandButton { color: #1f2c44; background: transparent; border: 0; padding: 0; font-size: 20px; font-weight: 800; letter-spacing: 2px; text-align: left; }
     #brandButton:hover { color: #2d65d6; }
-    #brandCredit { color: #6b7a93; font-size: 11px; font-weight: 700; }
+    #brandCredit { color: #df2f76; font-size: 11px; font-weight: 800; }
     #brandSub, #contentSubtitle { color: #5d6c85; font-size: 10px; font-weight: 700; letter-spacing: 1px; }
     #headerHint { color: #4c5d78; font-size: 11px; font-weight: 600; padding-right: 8px; }
     #hoverOverlay { background: transparent; }
@@ -475,6 +496,7 @@ THEMES = {
     #hoverHintChip { color: #2b5bb8; font-size: 11px; font-weight: 700; }
     #headerButton, #headerButtonSecondary, #primaryButton, #secondaryButton, #launchButton, #toggleAllButton { background: #edf1f9; color: #24334c; border: 1px solid #aab6c8; border-radius: 7px; padding: 5px 10px; font-size: 13px; font-weight: 700; }
     #headerButton, #headerButtonSecondary { font-size: 10px; }
+    #headerButton[stopMode="true"] { color: #d91f36; border-color: #d91f36; font-weight: 800; }
     #primaryButton, #secondaryButton, #launchButton, #toggleAllButton { font-size: 10px; }
     #headerButton:hover, #headerButtonSecondary:hover, #primaryButton:hover, #secondaryButton:hover, #launchButton:hover, #toggleAllButton:hover { background: #ffffff; color: #0b2a52; border: 2px solid #4d83eb; }
     #headerIconButton { background: #e4e9f2; border: 0; border-radius: 7px; padding: 0; }
@@ -735,13 +757,14 @@ THEMES = {
     #brand { color: #f2f6fc; font-size: 20px; font-weight: 800; letter-spacing: 2px; }
     #brandButton { color: #f2f6fc; background: transparent; border: 0; padding: 0; font-size: 20px; font-weight: 800; letter-spacing: 2px; text-align: left; }
     #brandButton:hover { color: #9fc3ff; }
-    #brandCredit { color: #b9c6d6; font-size: 11px; font-weight: 700; }
+    #brandCredit { color: #ffe066; font-size: 11px; font-weight: 800; }
     #brandSub, #contentSubtitle { color: #a9b6c6; font-size: 10px; font-weight: 700; letter-spacing: 1px; }
     #headerHint { color: #c2cddb; font-size: 11px; font-weight: 600; padding-right: 8px; }
     #hoverOverlay { background: transparent; }
     #hoverHintBox { background: #3d4753; border: 1px solid #aab1ba; border-radius: 8px; }
     #hoverHintChip { color: #dbe4ef; font-size: 11px; font-weight: 700; }
     #headerButton, #headerButtonSecondary { background: transparent; color: #e3eaf4; border: 1px solid #aab1ba; border-radius: 7px; padding: 5px 10px; font-size: 10px; font-weight: 700; }
+    #headerButton[stopMode="true"] { color: #ff6673; border-color: #ff6673; font-weight: 800; }
     #primaryButton, #secondaryButton, #launchButton, #toggleAllButton { font-size: 10px; }
     #headerButton:hover, #headerButtonSecondary:hover { background: #2d65d6; color: #ffffff; border: 2px solid #2d65d6; }
     /* 底部四个操作按钮（全部启动/保存/另存为/启动游戏）：透明底 + 国网绿描边，悬浮时背景变为国网绿 */
@@ -872,7 +895,7 @@ THEMES = {
     #contentBackButton { color: #b9c6d6; background: transparent; border: 0; padding: 0; }
     #contentBackButton:hover { color: #9fc3ff; background: rgba(122, 170, 255, 40); border-radius: 5px; }
     #mainDetailsHost, #mainConflictHost { background: transparent; }
-    #customModIntro { color: #c2cddb; padding: 4px 0; }
+    #customModIntro { color: #354454; padding: 4px 0; }
     #customModPresetName { min-height: 24px; font-size: 11px; }
     #customModSurface { background: rgba(184, 188, 194, 166); border: 1px solid rgba(105, 116, 129, 205); border-radius: 12px; }
     #customModSurface QPushButton { font-size: 11px; }
@@ -917,6 +940,9 @@ THEMES = {
     #customModPublishDialog QLineEdit { background: #d6d9de; color: #1f2b38; border: 1px solid #7a838e; border-radius: 7px; padding: 5px 8px; }
     #customModPublishDialog QLineEdit:focus { border-color: #406dac; }
     #customModPublishDialog QLineEdit:read-only { color: #526170; background: #c9ced5; }
+    #customModPublishDialog #primaryButton { background: #315f9e; color: #ffffff; border-color: #4f7ebd; }
+    #customModPublishDialog #secondaryButton { background: #c9ced5; color: #253443; border-color: #7a838e; }
+    #customModPublishDialog #primaryButton:hover, #customModPublishDialog #secondaryButton:hover { background: #406dac; color: #ffffff; border-color: #7199d1; }
     #mainDetailsPreview { background: #3a424d; border: 1px solid #4a545f; border-radius: 9px; }
     #mainDetailsTitle { color: #f2f6fc; font-size: 18px; font-weight: 800; }
     #mainDetailsField { color: #c2cddb; font-size: 12px; padding: 2px 0; }

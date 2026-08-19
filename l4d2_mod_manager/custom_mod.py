@@ -6,7 +6,7 @@ import re
 import shutil
 
 from PyQt5.QtCore import QPoint, Qt
-from PyQt5.QtGui import QColor, QFont, QImage, QPainter, QPolygon
+from PyQt5.QtGui import QColor, QFont, QFontMetrics, QImage, QPainter, QPalette, QPolygon
 from PyQt5.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
     QFormLayout, QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton,
@@ -343,14 +343,20 @@ def write_custom_preview(
     if image.isNull():
         image = QImage(960, 540, QImage.Format_RGB32)
         painter = QPainter(image)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setRenderHint(QPainter.TextAntialiasing)
         painter.fillRect(image.rect(), QColor("#152942"))
         painter.fillRect(0, 0, image.width(), 10, QColor("#4d83eb"))
         painter.setPen(QColor("#eaf2ff"))
-        painter.setFont(QFont("Microsoft YaHei UI", 36, QFont.Bold))
-        painter.drawText(image.rect().adjusted(56, 0, -56, -10), Qt.AlignCenter, title or "自定义 Mod")
-        painter.setPen(QColor("#9fb8d8"))
-        painter.setFont(QFont("Microsoft YaHei UI", 16))
-        painter.drawText(image.rect().adjusted(56, 180, -56, -10), Qt.AlignHCenter | Qt.AlignTop, "L4DBoss · Custom Loadout")
+        display_title = title or "自定义 Mod"
+        font = QFont("Microsoft YaHei UI", 78, QFont.Bold)
+        bounds = image.rect().adjusted(72, 48, -72, -48)
+        while font.pointSize() > 38 and QFontMetrics(font).boundingRect(
+            bounds, Qt.AlignCenter | Qt.TextWordWrap, display_title,
+        ).height() > bounds.height():
+            font.setPointSize(font.pointSize() - 4)
+        painter.setFont(font)
+        painter.drawText(bounds, Qt.AlignCenter | Qt.TextWordWrap, display_title)
         painter.end()
     image.save(str(target), "JPG", quality=92)
     return target
@@ -616,8 +622,15 @@ class CustomModPublishDialog(QDialog):
         self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
         self.setObjectName("customModPublishDialog")
         self.setMinimumWidth(ui(460))
-        layout = QVBoxLayout(self); layout.setContentsMargins(ui(22), ui(20), ui(22), ui(18)); layout.setSpacing(ui(12))
-        title = QLabel("发布自定义 Mod"); title.setObjectName("customModPublishTitle"); layout.addWidget(title)
+        outer = QVBoxLayout(self); outer.setContentsMargins(0, 0, 0, 0); outer.setSpacing(0)
+        from .components import DragHeader
+        header = DragHeader(self); header.setObjectName("dialogHeader")
+        header_layout = QHBoxLayout(header); header_layout.setContentsMargins(ui(18), ui(10), ui(12), ui(10))
+        title = QLabel("发布自定义 Mod"); title.setObjectName("dialogTitle"); header_layout.addWidget(title)
+        header_layout.addStretch(1)
+        close = QPushButton("×"); close.setObjectName("closeButton"); close.setToolTip("关闭"); close.clicked.connect(self.reject)
+        header_layout.addWidget(close); outer.addWidget(header)
+        content = QWidget(); layout = QVBoxLayout(content); layout.setContentsMargins(ui(22), ui(16), ui(22), ui(18)); layout.setSpacing(ui(12))
         subtitle = QLabel("名称用于管理器显示；封面将保存到 addons 文件夹。未选择图片时自动生成默认封面。")
         subtitle.setObjectName("customModIntro"); subtitle.setWordWrap(True); layout.addWidget(subtitle)
         form = QFormLayout(); form.setSpacing(ui(10))
@@ -625,6 +638,9 @@ class CustomModPublishDialog(QDialog):
         self.name_edit = QLineEdit(initial_name or "自定义 Mod"); form.addRow(name_label, self.name_edit)
         image_row = QWidget(); image_layout = QHBoxLayout(image_row); image_layout.setContentsMargins(0, 0, 0, 0); image_layout.setSpacing(ui(6))
         self.image_edit = QLineEdit(); self.image_edit.setPlaceholderText("未选择时自动生成封面"); self.image_edit.setReadOnly(True)
+        placeholder_palette = self.image_edit.palette()
+        placeholder_palette.setColor(QPalette.PlaceholderText, QColor(theme_color("input_placeholder")))
+        self.image_edit.setPalette(placeholder_palette)
         choose = QPushButton("选择图片"); choose.setObjectName("secondaryButton"); choose.clicked.connect(self._choose_image)
         image_layout.addWidget(self.image_edit, 1); image_layout.addWidget(choose)
         image_label = QLabel("封面图片"); image_label.setObjectName("customModPublishLabel")
@@ -635,6 +651,7 @@ class CustomModPublishDialog(QDialog):
         buttons.button(QDialogButtonBox.Ok).setObjectName("primaryButton")
         buttons.button(QDialogButtonBox.Cancel).setObjectName("secondaryButton")
         buttons.accepted.connect(self.accept); buttons.rejected.connect(self.reject); layout.addWidget(buttons)
+        outer.addWidget(content)
 
     def _choose_image(self) -> None:
         from .components import AppFileDialog

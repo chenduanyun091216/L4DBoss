@@ -246,8 +246,10 @@ def refresh_cards(self) -> None:
     self._update_pagination(len(filtered), total_pages)
     page_start = self.current_page * self.page_size
     page_mods = filtered[page_start:page_start + self.page_size]
+    _prune_card_cache(self, {mod.id for mod in page_mods})
     self.content_subtitle.setText(f"显示 {len(filtered)} 个 Mod  ·  点击卡片即可快速启用或禁用")
     if not filtered:
+        _prune_card_cache(self, set())
         columns = self.card_columns()
         self.cards_layout.setAlignment(Qt.Alignment())
         self.cards_layout.setRowStretch(0, 1)
@@ -331,6 +333,23 @@ def _populate_cards_batch(
     for column in range(columns):
         self.cards_layout.setColumnMinimumWidth(column, 0)
     self._sync_content_right_edges()
+
+
+def _prune_card_cache(self, keep_ids: set[str], limit: int = 220) -> None:
+    """Bound hidden card widgets while preserving the current page."""
+    if len(self._card_cache) <= limit:
+        return
+    for mod_id in list(self._card_cache):
+        if len(self._card_cache) <= limit:
+            break
+        if mod_id in keep_ids:
+            continue
+        card = self._card_cache.pop(mod_id)
+        preview = getattr(card, "preview", None)
+        if preview is not None:
+            preview.dismiss_popup()
+        card.hide()
+        card.deleteLater()
 
 
 def on_card_custom_title_changed(self, mod_id: str, custom_title: str) -> None:
@@ -589,8 +608,8 @@ def _sync_content_right_edges(self, force: bool = False) -> None:
     # remains the final item in this right-aligned layout, its right edge
     # shares the right edge of the last card as well.
     if hasattr(self, "search_input") and hasattr(self, "collection_combo"):
-        control_width = self.card_width(self.card_columns())
-        grid_gap = self.cards_layout.horizontalSpacing()
+        control_width = getattr(self, "_fixed_combo_width", ModCard.BASE_WIDTH)
+        grid_gap = getattr(self, "_fixed_filter_gap", ui(15))
         self._filter_controls.setSpacing(grid_gap)
         combo_width = control_width
         self.collection_combo.setFixedWidth(combo_width)
@@ -602,7 +621,7 @@ def _sync_content_right_edges(self, force: bool = False) -> None:
             content_left = self.content_bar.mapToGlobal(QPoint(0, 0)).x()
             bar_gap = self.content_bar.layout().spacing()
             filter_gap = self._filter_controls.spacing()
-            search_width = 2 * control_width + grid_gap
+            search_width = getattr(self, "_fixed_search_width", 2 * control_width + grid_gap)
             search_left = grid_right - combo_width - filter_gap - search_width
             title_width = search_left - content_left - bar_gap
             self.content_title_host.setFixedWidth(max(ui(1), title_width))
@@ -671,16 +690,21 @@ def _position_header_controls(self, search_width: int | None = None, combo_width
     search_left = self.search_box.mapToGlobal(QPoint(0, 0)).x()
     combo_left = self.collection_combo.mapToGlobal(QPoint(0, 0)).x()
     total = search_width if search_width is not None else self.search_box.width()
-    gap = self.cards_layout.horizontalSpacing() if hasattr(self, "cards_layout") else ui(11)
-    button_width = max(ui(60), (total - 3 * gap) // 4)
+    gap = getattr(self, "_fixed_filter_gap", ui(15))
+    available = max(ui(240), total - 3 * gap)
+    base_width, remainder = divmod(available, 4)
+    button_widths = [base_width + (1 if index < remainder else 0) for index in range(4)]
     y = max(0, (header.height() - self.choose_button.height()) // 2)
     header_left = header.mapFromGlobal(QPoint(search_left, 0)).x()
+    next_x = header_left
     for index, button in enumerate(self._header_action_buttons):
-        button.setFixedWidth(button_width)
-        button.move(header_left + index * (button_width + gap), y)
+        button.setFixedWidth(button_widths[index])
+        button.move(next_x, y)
         button.raise_()
+        next_x += button_widths[index] + gap
     custom_pos = header.mapFromGlobal(QPoint(combo_left, 0)).x()
     self.custom_mod_button.setFixedHeight(self.choose_button.height())
+    self.custom_mod_button.setFixedWidth(max(button_widths))
     self.custom_mod_button.move(
         custom_pos, max(0, (header.height() - self.custom_mod_button.height()) // 2)
     )

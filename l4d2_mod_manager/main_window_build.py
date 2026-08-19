@@ -84,6 +84,8 @@ def _build_ui(self) -> None:
     # as an inset so its controls align with the card viewport, not the bar.
     content_layout.setContentsMargins(ui(16), ui(6), ui(8), ui(18))
     content_layout.setSpacing(ui(0))
+    # 默认卡片宽度也是顶部固定几何的基准，必须在创建内容工具栏前确定。
+    self._card_size = ui(168)
     self.content_bar = self._build_content_bar()
     self.content_bar.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
     content_layout.addWidget(self.content_bar)
@@ -165,7 +167,6 @@ def _build_ui(self) -> None:
     # 让“卡片大小”文字相对“下一页”向右移一点。
     size_label.setStyleSheet("padding-right: 0px; padding-left: 4px;")
     # 默认卡片宽度：默认窗口（1250x730）下每排显示 5 张卡片。
-    self._card_size = ui(168)
     self.card_size_decrease = QPushButton("-")
     self.card_size_decrease.setObjectName("paginationButton")
     self.card_size_decrease.setFixedSize(ui(22), ui(20))
@@ -214,6 +215,7 @@ def _build_header(self) -> QWidget:
     layout.setSpacing(ui(1))
     brand = QVBoxLayout()
     brand.setSpacing(0)
+    brand.setContentsMargins(0, ui(3), 0, 0)
     name_row = QHBoxLayout()
     name_row.setSpacing(ui(8))
     brand_icon = QLabel()
@@ -234,7 +236,7 @@ def _build_header(self) -> QWidget:
         )
         title_pixmap.setDevicePixelRatio(device_ratio)
         brand_icon.setPixmap(title_pixmap)
-    name = QPushButton("L4D2  BOSS")
+    name = AnimatedBrandButton("L4D2 BOSS")
     name.setObjectName("brandButton")
     name.setToolTip("查看软件信息")
     name.clicked.connect(self.show_about)
@@ -244,15 +246,12 @@ def _build_header(self) -> QWidget:
     credit = QLabel("@ by Mr.Chen")
     credit.setObjectName("brandCredit")
     credit.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-    credit.setContentsMargins(0, ui(3), 0, 0)
+    credit.setContentsMargins(0, 0, 0, 0)
     name_row.addWidget(brand_icon, 0, Qt.AlignVCenter)
     name_row.addWidget(name, 0, Qt.AlignVCenter)
     name_row.addWidget(credit)
     name_row.addStretch(1)
-    sub = QLabel("MOD LOADOUT MANAGER")
-    sub.setObjectName("brandSub")
     brand.addLayout(name_row)
-    brand.addWidget(sub)
     layout.addLayout(brand)
     layout.addStretch(1)
     # 置顶反馈提示：位于头部“选择游戏”按钮左侧的空白区域，紧邻按钮显示，
@@ -298,14 +297,14 @@ def _build_header(self) -> QWidget:
     # 头部四个按钮（选择游戏/扫描 Mod/同步 Steam/主题）不再使用悬浮弹框
     # 提示，悬停说明统一以置顶覆盖层显示在按钮左侧的空白区域。
     self.choose_button = self._header_button(
-        QStyle.SP_FileDialogNewFolder, "选择游戏", self.choose_directory,
+        ICON_DIR / "choose_game.png", "选择游戏", self.choose_directory,
         secondary=True,
     )
     self.refresh_button = self._header_button(
-        QStyle.SP_BrowserReload, "扫描Mod", lambda: self.scan_mods(False),
+        ICON_DIR / "scan_mod.png", "扫描Mod", lambda: self.scan_mods(False),
     )
     self.fetch_button = self._header_button(
-        QStyle.SP_ArrowDown, "同步Steam", self.fetch_steam_info,
+        ICON_DIR / "sync_steam.png", "同步Steam", self.fetch_steam_info,
     )
     # 头部四个按钮放入独立子布局：按钮之间仍保持 11px 间距。
     self.header_action_layout = QHBoxLayout()
@@ -321,7 +320,7 @@ def _build_header(self) -> QWidget:
     )
     self._update_theme_button()
     self.custom_mod_button = self._header_button(
-        QStyle.SP_FileDialogDetailedView, "创建mod", self.open_custom_mod_dialog,
+        ICON_DIR / "create_mod.png", "创建mod", self.open_custom_mod_dialog,
     )
     # These are the four controls that form the header action group.  The
     # custom-Mod button is deliberately kept separate: its left edge is the
@@ -330,6 +329,7 @@ def _build_header(self) -> QWidget:
         self.choose_button, self.refresh_button, self.fetch_button, self.theme_button,
     )
     header_action_width = max(button.sizeHint().width() for button in self._header_action_buttons) + ui(4)
+    self._fixed_header_button_width = header_action_width
     for button in self._header_action_buttons:
         button.setFixedWidth(header_action_width)
     # The custom-Mod button is positioned independently below because its
@@ -339,7 +339,7 @@ def _build_header(self) -> QWidget:
         self.header_action_layout.removeWidget(button)
         button.setParent(header)
         button.show()
-    self.custom_mod_button.setFixedWidth(self.custom_mod_button.sizeHint().width())
+    self.custom_mod_button.setFixedWidth(header_action_width)
     self.custom_mod_button.setFixedHeight(ui(30))
     self.custom_mod_button.show()
     layout.addLayout(self.header_action_layout)
@@ -372,7 +372,13 @@ def _build_header(self) -> QWidget:
 def _header_button(
     self, icon, text, handler, secondary: bool = False, icon_only: bool = False, tooltip: str = "",
 ) -> QPushButton:
-    button = QPushButton(self.style().standardIcon(icon), text)
+    if isinstance(icon, QIcon):
+        resolved_icon = icon
+    elif isinstance(icon, (str, Path)):
+        resolved_icon = QIcon(str(icon))
+    else:
+        resolved_icon = self.style().standardIcon(icon)
+    button = QPushButton(resolved_icon, text)
     button.setIconSize(QSize(ui(14), ui(14)))
     if icon_only:
         button.setText("")
@@ -485,21 +491,8 @@ def _update_theme_button(self) -> None:
 
 
 def _theme_icon(self) -> QIcon:
-    """Create a compact light/dark disc for the theme selector."""
-    size = ui(22)
-    pixmap = QPixmap(size, size)
-    pixmap.fill(Qt.transparent)
-    painter = QPainter(pixmap)
-    painter.setRenderHint(QPainter.Antialiasing)
-    painter.setPen(Qt.NoPen)
-    painter.setBrush(QColor("#39c6dc"))
-    painter.drawEllipse(ui(2), ui(2), size - ui(4), size - ui(4))
-    painter.setBrush(QColor("#f5f8fd"))
-    painter.drawEllipse(ui(2), ui(2), (size - ui(4)) // 2, size - ui(4))
-    painter.setBrush(QColor("#18344e"))
-    painter.drawEllipse(ui(7), ui(7), ui(4), ui(4))
-    painter.end()
-    return QIcon(pixmap)
+    """Return the dedicated artwork for the active visual theme."""
+    return QIcon(str(ICON_DIR / f"theme_{self._theme}.png"))
 
 
 def _open_theme_menu(self) -> None:
@@ -512,6 +505,7 @@ def _open_theme_menu(self) -> None:
     menu.setFixedWidth(max(ui(1), self.theme_button.width()))
     for theme_key in THEME_ORDER:
         action = menu.addAction(THEME_LABELS.get(theme_key, theme_key))
+        action.setIcon(QIcon(str(ICON_DIR / f"theme_{theme_key}.png")))
         action.setCheckable(True)
         action.setChecked(theme_key == self._theme)
         hint = THEME_HINTS.get(theme_key, "")
@@ -641,7 +635,13 @@ def _build_content_bar(self) -> QWidget:
     search_layout.addWidget(self.search_input, 1)
     self.collection_combo = MultiSelectComboBox()
     self.collection_combo.setObjectName("collectionCombo")
-    self.collection_combo.setFixedWidth(ui(214))
+    # 顶部筛选控件采用默认卡片尺寸的固定黄金比例；窗口缩放和卡片尺寸
+    # 调整只改变位置，不再改变这些控件本身的长度。
+    self._fixed_filter_gap = ui(11)
+    self._fixed_combo_width = self._card_size
+    self._fixed_search_width = 2 * self._card_size + self._fixed_filter_gap
+    self.search_box.setFixedWidth(self._fixed_search_width)
+    self.collection_combo.setFixedWidth(self._fixed_combo_width)
     self.collection_combo.setMaxVisibleItems(7)
     self.collection_combo.view().setObjectName("collectionComboMenu")
     self.collection_combo.view().setTextElideMode(Qt.ElideRight)
@@ -751,8 +751,8 @@ def _build_footer(self) -> QWidget:
     # 头部按钮取各自自然宽度、高度统一；底部四个按钮统一使用“启动游戏”
     # 按钮的宽度，保持右下角按钮组等宽（高度同样统一）。
     action_height = max(ui(1), max(button.minimumSizeHint().height() for button in self._footer_action_buttons))
-    for button in self._header_action_buttons:
-        button.setFixedSize(button.minimumSizeHint().width(), action_height)
+    for button in (*self._header_action_buttons, self.custom_mod_button):
+        button.setFixedSize(self._fixed_header_button_width, action_height)
     launch_width = self.launch_button.minimumSizeHint().width()
     for button in self._footer_action_buttons:
         button.setFixedSize(launch_width, action_height)

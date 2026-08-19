@@ -4,7 +4,7 @@ from pathlib import Path
 
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QColor, QPainter, QPixmap
-from PyQt5.QtWidgets import QDialog, QFrame, QGraphicsOpacityEffect, QLabel, QVBoxLayout
+from PyQt5.QtWidgets import QComboBox, QDialog, QFrame, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
 
 from .custom_mod import (
     CUSTOM_MOD_FILENAME,
@@ -16,7 +16,7 @@ from .custom_mod import (
     validate_custom_vpk,
     write_custom_preview,
 )
-from .components import AppInputBox, AppMessageBox
+from .components import AppInputBox, AppMessageBox, DragHeader
 from .theme import BACKGROUND_IMAGE, theme_color, ui
 
 # Do not fall back to native Windows prompts inside the themed custom-Mod
@@ -42,6 +42,21 @@ class CustomModEditorDialog(QDialog):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         self.content_layout = layout
+
+        header = DragHeader(self)
+        header.setObjectName("dialogHeader")
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(ui(18), ui(10), ui(12), ui(10))
+        title = QLabel("创建 Mod")
+        title.setObjectName("dialogTitle")
+        header_layout.addWidget(title)
+        header_layout.addStretch(1)
+        close = QPushButton("×")
+        close.setObjectName("closeButton")
+        close.setToolTip("关闭")
+        close.clicked.connect(self.reject)
+        header_layout.addWidget(close)
+        layout.addWidget(header)
 
     def set_editor(self, editor: CustomModPage) -> None:
         self.content_layout.addWidget(editor, 1)
@@ -81,6 +96,18 @@ def _set_custom_focus(self, enabled: bool) -> None:
 
 
 def open_custom_mod_page(self) -> None:
+    # 模态窗口打开前清理独立 Tool/Popup，避免 Windows Qt 在焦点切换时
+    # 销毁仍持有鼠标状态的原生窗口（可能触发 0xC0000409）。
+    clear_hint = getattr(self, "_clear_hover_hint", None)
+    if clear_hint is not None:
+        clear_hint()
+    for combo in self.findChildren(QComboBox):
+        dismiss = getattr(combo, "dismiss_popup", None)
+        dismiss() if dismiss is not None else combo.hidePopup()
+    for card in getattr(self, "_card_cache", {}).values():
+        preview = getattr(card, "preview", None)
+        if preview is not None:
+            preview.dismiss_popup()
     addon_dirs = self.configured_addon_directories()
     if not addon_dirs:
         QMessageBox.information(self, "需要选择游戏", "请先选择 left4dead2.exe。")
@@ -158,7 +185,7 @@ def open_custom_mod_page(self) -> None:
         output = addons_root / previous_filename
         publish = None
         if values:
-            publish = CustomModPublishDialog(self, self.settings.get("custom_mod_display_name", "自定义 Mod"))
+            publish = CustomModPublishDialog(dialog, self.settings.get("custom_mod_display_name", "自定义 Mod"))
             if publish.exec_() != publish.Accepted:
                 return
         try:
@@ -211,12 +238,6 @@ def open_custom_mod_page(self) -> None:
     page.back_button.clicked.connect(dialog.reject)
     dialog.exec_()
     if dialog.generated:
-        # scan_mods rebuilds every Mod, so apply the custom title only AFTER the
-        # scan so it is not immediately discarded by on_scan_finished.
+        # 自定义名称已保存在 settings，异步扫描完成后由 on_scan_finished
+        # 统一回填；这里不能在任务尚未结束时读取旧 self.mods。
         self.scan_mods(True)
-        if publish is not None:
-            for mod in self.mods.values():
-                if Path(mod.file_path).name.casefold() == self.settings.get("custom_mod_filename", CUSTOM_MOD_FILENAME).casefold():
-                    mod.custom_title = publish.mod_name
-                    self.storage.save_mods(self.mods)
-                    break

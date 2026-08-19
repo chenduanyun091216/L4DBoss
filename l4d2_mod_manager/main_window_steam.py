@@ -49,10 +49,7 @@ def sync_single_mod_steam(self, mod_id: str) -> None:
     self.steam_sync_in_progress = True
     self._progress_owner = "steam"
     self._steam_cancel_event.clear()
-    self.fetch_button.setEnabled(False)
-    self.fetch_button.setText("")
-    self.fetch_button.setIcon(self.style().standardIcon(QStyle.SP_BrowserStop))
-    self.fetch_button.setEnabled(True)
+    self._set_steam_stop_mode(True)
     self.steam_sync_progress.setRange(0, 1)
     self.steam_sync_progress.setValue(0)
     self._set_steam_sync_status(0, 1)
@@ -98,8 +95,7 @@ def cancel_steam_sync(self) -> None:
     if not self.steam_sync_in_progress:
         return
     self._steam_cancel_event.set()
-    self.fetch_button.setText("")
-    self.fetch_button.setIcon(self.style().standardIcon(QStyle.SP_BrowserStop))
+    self._set_steam_stop_mode(True)
     self.fetch_button.setEnabled(False)
     label = self.steam_sync_widget.findChild(QLabel, "steamSyncLabel")
     if label is not None:
@@ -113,9 +109,20 @@ def on_steam_cancelled(self) -> None:
 
 
 def _reset_steam_sync_controls(self) -> None:
-    self.fetch_button.setText("同步Steam")
-    self.fetch_button.setIcon(self.style().standardIcon(QStyle.SP_ArrowDown))
+    self._set_steam_stop_mode(False)
     self.fetch_button.setEnabled(True)
+
+
+def _set_steam_stop_mode(self, stopping: bool) -> None:
+    """Keep every Steam-sync entry point on the same visible button state."""
+    button = self.fetch_button
+    button.setProperty("stopMode", stopping)
+    button.setText("停止" if stopping else "同步Steam")
+    icon_name = "stop_sync.png" if stopping else "sync_steam.png"
+    button.setIcon(QIcon(str(ICON_DIR / icon_name)))
+    button.style().unpolish(button)
+    button.style().polish(button)
+    button.update()
 
 
 def _set_steam_sync_status(self, completed: int, total: int) -> None:

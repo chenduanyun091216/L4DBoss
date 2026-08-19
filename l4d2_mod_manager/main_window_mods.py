@@ -28,6 +28,7 @@ from PyQt5.QtWidgets import (
 from .categories import CATEGORIES, SIMPLE_CATEGORIES, effective_tags, infer_categories, simple_categories
 from .dependencies import dependency_label, dependency_status, resolve_dependents
 from .collection_sync import delete_collection_folder, restore_collection_files, sync_collection_files
+from .custom_mod import CUSTOM_MOD_FILENAME
 from .models import Mod, ModCollection
 from .steam_client import SteamClient
 from .storage import AppStorage
@@ -166,10 +167,20 @@ def scan_mods(self, refresh_all: bool) -> None:
     label = self.steam_sync_widget.findChild(QLabel, "steamSyncLabel")
     if label is not None:
         label.set_full_text("正在扫描游戏 Mod…")
-    worker = Worker(scan_mod_directory, existing_dirs, self.mods, refresh_all)
+    worker = Worker(_scan_mods_with_conflict_paths, existing_dirs, self.mods, refresh_all)
     worker.signals.finished.connect(self.on_scan_finished)
     worker.signals.failed.connect(self.on_worker_failed)
     self.thread_pool.start(worker)
+
+
+def _scan_mods_with_conflict_paths(existing_dirs, existing_mods, refresh_all):
+    """Do VPK parsing and conflict-path filtering entirely off the UI thread."""
+    mods = scan_mod_directory(existing_dirs, existing_mods, refresh_all)
+    conflict_paths = {
+        mod_id: {path for path in mod.files if is_conflict_relevant_path(path)}
+        for mod_id, mod in mods.items()
+    }
+    return mods, conflict_paths
 
 
 def reset_mods(self) -> None:
@@ -179,7 +190,11 @@ def reset_mods(self) -> None:
         self.scan_mods(True)
 
 
-def on_scan_finished(self, mods: dict[str, Mod]) -> None:
+def on_scan_finished(self, result) -> None:
+    if isinstance(result, tuple):
+        mods, conflict_paths = result
+    else:  # Compatibility with tests or older worker results.
+        mods, conflict_paths = result, None
     old_active = {key for key, mod in self.mods.items() if mod.active}
     # Re-scan rebuilds every Mod object, so user-edited fields (custom_title,
     # favorite, dependencies, etc.) stored on the previous objects would be lost.
@@ -205,12 +220,36 @@ def on_scan_finished(self, mods: dict[str, Mod]) -> None:
     for key in old_active:
         if key in self.mods:
             self.mods[key].active = True
+    custom_filename = self.settings.get("custom_mod_filename", CUSTOM_MOD_FILENAME)
+    custom_title = self.settings.get("custom_mod_display_name", "")
+    if custom_title:
+        for mod in self.mods.values():
+            if Path(mod.file_path).name.casefold() == custom_filename.casefold():
+                mod.custom_title = custom_title
+                break
     self._apply_steam_cache(self.mods)
     # A collection switch may have restored files just before this scan.
-    # Re-apply the selected collection so every newly discovered Mod in it
-    # is enabled as well.
-    self.apply_selected_collections()
-    self._rebuild_conflict_index()
+    # Apply its union in-place; calling apply_selected_collections() here used
+    # to save and refresh the whole UI once, only for this function to repeat
+    # both operations immediately afterwards.
+    if self._selected_collection_names:
+        active_ids = set().union(*(
+            collection.mod_ids for collection in self.collections
+            if collection.name in self._selected_collection_names
+        ))
+        for mod in self.mods.values():
+            mod.active = mod.id in active_ids
+    if conflict_paths is None:
+        self._rebuild_conflict_index()
+    else:
+        self._conflict_paths = conflict_paths
+        self._active_path_owners = {}
+        for mod_id, mod in self.mods.items():
+            if not mod.active:
+                continue
+            for path in self._conflict_paths.get(mod_id, set()):
+                self._active_path_owners.setdefault(path, set()).add(mod_id)
+        self._refresh_conflicts_from_index()
     self.storage.save_mods(self.mods)
     self.refresh_cards(); self.refresh_stats(); self.set_busy(False)
     total = len(self.mods)
@@ -277,10 +316,7 @@ def fetch_steam_info(self) -> None:
     self.steam_sync_in_progress = True
     self._progress_owner = "steam"
     self._steam_cancel_event.clear()
-    self.fetch_button.setEnabled(False)
-    self.fetch_button.setText("")
-    self.fetch_button.setIcon(self.style().standardIcon(QStyle.SP_BrowserStop))
-    self.fetch_button.setEnabled(True)
+    self._set_steam_stop_mode(True)
     total = len(pending_mods)
     self.steam_sync_progress.setRange(0, total)
     self.steam_sync_progress.setValue(0)
