@@ -16,16 +16,25 @@ from copy import deepcopy
 from pathlib import Path
 from threading import Event
 
-from PyQt5.QtCore import QEvent, QObject, QPoint, QRunnable, QSize, QTimer, QUrl, Qt, QThreadPool, pyqtSignal
-from PyQt5.QtGui import QColor, QDesktopServices, QFont, QIcon, QLinearGradient, QPainter, QPixmap
+from PyQt5.QtCore import QEvent, QMimeData, QObject, QPoint, QRect, QRunnable, QSize, QTimer, QUrl, Qt, QThreadPool, pyqtSignal
+from PyQt5.QtGui import QColor, QDesktopServices, QDrag, QFont, QIcon, QLinearGradient, QPainter, QPixmap
 from PyQt5.QtWidgets import (
     QAction, QApplication, QComboBox, QDialog, QFileDialog, QFrame, QGridLayout,
-    QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMainWindow, QMenu, QMessageBox,
+    QHBoxLayout, QInputDialog, QLabel, QLayout, QLineEdit, QMainWindow, QMenu, QMessageBox,
     QAbstractItemView, QProgressBar, QPushButton, QScrollArea, QSizeGrip, QSizePolicy, QSplitter, QStyle,
     QStyledItemDelegate, QStyleOptionViewItem, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget, QWidgetAction,
+    QWidgetItem,
 )
 
-from .categories import CATEGORIES, SIMPLE_CATEGORIES, infer_categories, simple_categories
+from .categories import (
+    CATEGORIES,
+    SIMPLE_CATEGORIES,
+    collect_all_category_ids,
+    effective_tags,
+    infer_categories,
+    iter_category_tree,
+    simple_categories,
+)
 from .dependencies import extract_workshop_ids
 from .collection_sync import delete_collection_folder, restore_collection_files, sync_collection_files
 from .models import Mod, ModCollection
@@ -233,7 +242,7 @@ class HintOverlay(QWidget):
 
 def mod_type_tags(mod: Mod) -> list[tuple[str, str]]:
     """Return at most three useful type tags, preferring concrete targets."""
-    categories = set(mod.categories)
+    categories = set(effective_tags(mod))
     tags: list[tuple[str, str]] = []
     seen: set[str] = set()
 
@@ -296,24 +305,27 @@ class CustomTitleMixin:
 
     ModCard 与 ConflictCard 共用。使用方需在 __init__ 中先创建 preview 与
     title_label（TwoLineElidedLabel），再调用 _setup_custom_title(preview, title)；
-    并自行声明 custom_title_changed = pyqtSignal(str, str) 信号。
+    并自行声明 custom_title_changed = pyqtSignal(str, str) 与
+    mod_info_changed = pyqtSignal(str, str, list, list) 信号。
     """
+    mod_info_changed = pyqtSignal(str, str, list, list)  # (mod_id, custom_title, manual_tags, excluded_auto_tags)
 
     def _setup_custom_title(self, preview: QWidget, title_label: QLabel) -> None:
         self._custom_title = self.mod.custom_title or ""
         self._show_custom = True
         self.title_label = title_label
-        # 右上角“修改名称”按钮（一支笔）：点击弹出输入框修改卡片名称。
+        # 右上角紧凑编辑按钮：不增加尺寸，提供更清晰的悬停/按下层级。
         self._rename_button = QPushButton("✎", preview)
         self._rename_button.setObjectName("cardRenameButton")
         self._rename_button.setFixedSize(ui(18), ui(18))
         self._rename_button.setCursor(Qt.PointingHandCursor)
-        self._rename_button.setToolTip("修改卡片名称")
+        self._rename_button.setToolTip("编辑名称和标签")
         self._rename_button.setStyleSheet(
-            f"QPushButton {{ background: rgba(16,22,34,0.72); color: #eaf2ff;"
-            f" border-radius: {ui(9)}px; border: 1px solid rgba(126,160,214,0.5);"
-            ' font-family: "Segoe UI Symbol", "Segoe UI"; font-size: 11px; }'
-            "QPushButton:hover { background: rgba(45,101,214,0.9); color: white; }"
+            f"QPushButton {{ background: rgba(12, 20, 34, 0.78); color: #eef5ff;"
+            f" border-radius: {ui(9)}px; border: 1px solid rgba(145, 181, 239, 0.62);"
+            ' font-family: "Segoe UI Symbol", "Segoe UI"; font-size: 12px; font-weight: 600; padding: 0; }'
+            "QPushButton:hover { background: #2d65d6; border-color: #91b5ef; color: white; }"
+            "QPushButton:pressed { background: #1f4eaa; border-color: #6e9bea; }"
         )
         self._rename_button.clicked.connect(self._on_rename_clicked)
         # “改”红色圆圈（位于修改笔左侧）：点击在自定义名称与原始名称间切换。
@@ -367,20 +379,25 @@ class CustomTitleMixin:
         self._refresh_title()
 
     def _on_rename_clicked(self) -> None:
-        original = self.mod.title or self.mod.file_name
-        current = self._custom_title or original
-        name, ok = QInputDialog.getText(
-            self, "修改卡片名称", "自定义名称（留空恢复原始名称）：", text=current
-        )
-        if not ok:
-            return
-        name = name.strip()
-        if not name or name == original:
-            name = ""
-        self._custom_title = name
-        self._show_custom = True
-        self.custom_title_changed.emit(self.mod.id, name)
-        self._refresh_title()
+        # 复用原“修改卡片名称”入口，扩展为同时编辑名称与标签。
+        # 编辑按钮可能在组合筛选下拉框刚完成一次点击时触发；Qt 会在下一
+        # 个事件循环才收起该原生 popup，导致它短暂盖在编辑窗上。打开模态窗
+        # 前显式关闭主窗口的下拉层，避免这个闪烁的小框。
+        host_window = self.window()
+        for combo in host_window.findChildren(QComboBox):
+            dismiss = getattr(combo, "dismiss_popup", None)
+            if dismiss is not None:
+                dismiss()
+            else:
+                combo.hidePopup()
+        available = sorted(set(collect_all_category_ids()) | set(getattr(self.mod, "manual_tags", []) or []))
+        dialog = EditModInfoDialog(self.mod, available, self)
+        dialog.mod_info_changed.connect(self.mod_info_changed)
+        if dialog.exec_() == QDialog.Accepted and self.mod.id == dialog.mod.id:
+            # 名称部分：同步到 mixin 内部状态并刷新角标。
+            self._custom_title = self.mod.custom_title or ""
+            self._show_custom = True
+            self._refresh_title()
 
     def _toggle_custom_title(self) -> None:
         if not self._custom_title:
@@ -405,6 +422,7 @@ class ModCard(CustomTitleMixin, QFrame):
     context_requested = pyqtSignal(str, object)
     favorite_toggled = pyqtSignal(str)
     custom_title_changed = pyqtSignal(str, str)  # (mod_id, custom_title)
+    mod_info_changed = pyqtSignal(str, str, list, list)  # (mod_id, custom_title, manual_tags, excluded_auto_tags)
     BASE_WIDTH = ui(214)
     BASE_HEIGHT = ui(258)
 
@@ -446,6 +464,8 @@ class ModCard(CustomTitleMixin, QFrame):
         self._collection_tag_host.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         self._collection_tag_host.setStyleSheet("background: transparent;")
         self._collection_chips: list[QLabel] = []
+        # Default chip font until set_card_width()/_apply_scaled_fonts() runs.
+        self._collection_chip_font_size = 9
         self._collection_tag_host.hide()
 
         title = TwoLineElidedLabel("")
@@ -553,7 +573,6 @@ class ModCard(CustomTitleMixin, QFrame):
             round(ui(10) * scale), 0,
         )
         self.preview.setFixedSize(max(1, width - round(ui(20) * scale)), round(ui(112) * scale))
-        self._layout_collection_tag()
         self._layout_corner_buttons()
         self._layout_pinned_icon()
         self.title_label.setFixedHeight(round(ui(40) * scale))
@@ -563,6 +582,10 @@ class ModCard(CustomTitleMixin, QFrame):
         self.favorite_star.setFixedSize(round(ui(28) * scale), round(ui(28) * scale))
         self.toggle_button.setFixedHeight(round(ui(22) * scale))
         self._apply_scaled_fonts(scale)
+        # Layout the collection tags only after the chip font has been scaled,
+        # otherwise _layout_collection_tag measures widths with the unscaled
+        # 9px font and wraps/aligns incorrectly on non-default-size cards.
+        self._layout_collection_tag()
 
     @staticmethod
     def _scaled_px(base: int, scale: float) -> int:
@@ -576,10 +599,14 @@ class ModCard(CustomTitleMixin, QFrame):
         action_size = self._scaled_px(11, scale)
         star_size = self._scaled_px(18, scale)
         tag_size = self._scaled_px(9, scale)
-        font_key = (title_size, meta_size, summary_size, action_size, star_size, tag_size)
+        # Collection chips share the tag scale but keep their own key so the
+        # chip font is always aligned with whatever the chips were rebuilt with.
+        chip_size = tag_size
+        font_key = (title_size, meta_size, summary_size, action_size, star_size, tag_size, chip_size)
         if getattr(self, "_font_scale_key", None) == font_key:
             return
         self._font_scale_key = font_key
+        self._collection_chip_font_size = chip_size
         self.title_label.setStyleSheet(f"font-size: {title_size}px;")
         self.meta_label.setStyleSheet(f"font-size: {meta_size}px;")
         self.type_summary_label.setStyleSheet(f"font-size: {summary_size}px;")
@@ -684,7 +711,8 @@ class ModCard(CustomTitleMixin, QFrame):
             f"background: {color}; color: #ffffff;"
             f" border-radius: {ui(8)}px;"
             f" min-height: {ui(16)}px; max-height: {ui(16)}px;"
-            " padding: 0 6px; font-size: 9px; font-weight: 700;"
+            f" padding: 0 6px; font-size: {self._collection_chip_font_size}px;"
+            " font-weight: 700;"
         )
         return chip
 
@@ -755,13 +783,23 @@ class ModCard(CustomTitleMixin, QFrame):
 
     def refresh_state(self) -> None:
         """Refresh only dynamic controls while keeping the preview image alive."""
-        self.setObjectName(
+        new_card_name = (
             "modCardConflict" if self.mod.active and self.mod.conflict_with else ("modCardActive" if self.mod.active else "modCard")
         )
+        # QSS descendant selectors (e.g. #modCardActive #cardTitle) are resolved
+        # per child at polish time, so a card-state flip needs the whole subtree
+        # re-polished.  Only do that when the state actually changed: re-polishing
+        # every reused card on every refresh is the dominant cost under load.
+        subtree_dirty = self.objectName() != new_card_name
+        self.setObjectName(new_card_name)
         if getattr(self.preview, "_image_path_key", None) != (self.mod.image_path or ""):
             self.preview.refresh_image(self.mod)
         self._sync_custom_title()
         self.set_addonlist_pinned(bool(getattr(self.mod, "addonlist_pinned", False)))
+        # 类型标签跟随用户编辑（增删标签）实时刷新。
+        type_labels = [text for text, _color in mod_type_tags(self.mod)]
+        self.type_summary_label.setText(f"tags: {' '.join(type_labels)}" if type_labels else "tags: -")
+        self.type_summary_label.setToolTip("类型标签：" + ("、".join(type_labels) if type_labels else "暂无"))
         # Remove the dynamic tag widgets but never delete the persistent
         # favorite star: it is re-added below and a queued deleteLater on it
         # would free a widget still referenced by the layout (use-after-free
@@ -794,11 +832,12 @@ class ModCard(CustomTitleMixin, QFrame):
         # objectName 变化会影响子控件的后代选择器（如 #modCardActive #cardTitle），
         # 只重抛光卡片本身不够：子标签的样式是按各自缓存的，必须整棵子树
         # 重新 unpolish/polish，标题/元信息文字颜色才会跟着激活状态切换。
-        for widget in self.findChildren(QWidget):
-            widget.style().unpolish(widget)
-            widget.style().polish(widget)
-        self.style().unpolish(self)
-        self.style().polish(self)
+        if subtree_dirty:
+            for widget in self.findChildren(QWidget):
+                widget.style().unpolish(widget)
+                widget.style().polish(widget)
+            self.style().unpolish(self)
+            self.style().polish(self)
         self._apply_scaled_fonts(self._card_width / self.BASE_WIDTH)
         self.update()
 
@@ -826,6 +865,7 @@ class HoverPreview(QLabel):
         self.setScaledContents(False)
         self._image_path_key = mod.image_path or ""
         self._scaled: QPixmap | None = make_preview_pixmap(mod, width, height)
+        self._compose_key: tuple | None = None
         self._refresh_preview_pixmap()
 
     def refresh_image(self, mod: Mod) -> None:
@@ -845,6 +885,15 @@ class HoverPreview(QLabel):
             h = self.height()
             w = self.width()
             if w > 0 and h > 0:
+                # The composed result depends only on the source pixmap and the
+                # current size.  resizeEvent fires repeatedly while the card is
+                # laid out; recomposing on every pass means three smooth
+                # scaled() calls per resize, so cache the last composition and
+                # bail out when nothing relevant changed.
+                compose_key = (self._scaled, w, h)
+                if self._compose_key == compose_key:
+                    return
+                self._compose_key = compose_key
                 target = QSize(w, h)
                 # A small cover image scaled back up makes a soft backdrop,
                 # without using native effects or extra child widgets.
@@ -1083,6 +1132,7 @@ class ConflictCard(CustomTitleMixin, QFrame):
     disable_requested = pyqtSignal(str)
     context_requested = pyqtSignal(str, object)
     custom_title_changed = pyqtSignal(str, str)
+    mod_info_changed = pyqtSignal(str, str, list, list)
 
     def __init__(self, mod: Mod, width: int | None = None):
         super().__init__()
@@ -1098,6 +1148,7 @@ class ConflictCard(CustomTitleMixin, QFrame):
         # 双击发生时取消，避免双击禁用前先触发一次置顶。
         self._pin_timer = QTimer(self)
         self._pin_timer.setSingleShot(True)
+        self._drag_origin: QPoint | None = None
         layout = QVBoxLayout(self)
         layout.setContentsMargins(ui(10), ui(10), ui(10), ui(10))
         layout.setSpacing(ui(5))
@@ -1147,13 +1198,11 @@ class ConflictCard(CustomTitleMixin, QFrame):
         tags.addWidget(make_tag_button("STEAM" if mod.steam_loaded and mod.workshop_id else "本地", "#365f9f" if mod.steam_loaded and mod.workshop_id else "#526073", "打开来源", self.open_source))
         tags.addStretch(1)
         layout.addLayout(tags)
-        hint = QLabel("单击置顶优先 · 双击禁用")
+        hint = QLabel("拖动调整优先级 · 双击禁用")
         hint.setObjectName("conflictCaption")
-        hint.setText("右键管理置顶 · 双击禁用")
-        hint.setToolTip("右键：使用与普通卡片相同的置顶/取消置顶；双击：禁用该 Mod")
-        hint.setToolTip("单击：将该 Mod 置顶为冲突组首位（addonlist.txt 中优先加载）；双击：禁用该 Mod")
+        hint.setText("拖动调整优先级 · 双击禁用")
+        hint.setToolTip("拖动：调整同组优先级并同步到 addonlist.txt；双击：禁用该 Mod")
         layout.addWidget(hint)
-        hint.setToolTip("右键：使用与普通卡片相同的置顶/取消置顶；双击：禁用该 Mod")
 
     def open_source(self) -> None:
         if self.mod.steam_loaded and self.mod.workshop_id:
@@ -1169,15 +1218,31 @@ class ConflictCard(CustomTitleMixin, QFrame):
 
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.LeftButton:
-            # 单击与双击共用第一次按下：延迟到双击判定窗口结束后再置顶，
-            # 避免双击禁用前先误触发置顶。
-            self._pin_timer.start(QApplication.doubleClickInterval())
+            self._drag_origin = event.pos()
             event.accept()
             return
         super().mousePressEvent(event)
 
+    def mouseMoveEvent(self, event) -> None:
+        if (
+            self._drag_origin is not None
+            and event.buttons() & Qt.LeftButton
+            and (event.pos() - self._drag_origin).manhattanLength() >= QApplication.startDragDistance()
+        ):
+            self._pin_timer.stop()
+            drag = QDrag(self)
+            payload = QMimeData()
+            payload.setData("application/x-l4dboss-conflict-mod", self.mod.id.encode("utf-8"))
+            drag.setMimeData(payload)
+            drag.exec_(Qt.MoveAction)
+            self._drag_origin = None
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
     def mouseDoubleClickEvent(self, event) -> None:
         self._pin_timer.stop()
+        self._drag_origin = None
         if event.button() == Qt.LeftButton:
             self.disable_requested.emit(self.mod.id)
             event.accept()
@@ -1188,21 +1253,55 @@ class ConflictCard(CustomTitleMixin, QFrame):
         self._pin_timer.stop()
         self.context_requested.emit(self.mod.id, event.globalPos())
         event.accept()
-def conflict_group_sort_key(mod: Mod):
-    """冲突组内排序键：被置顶的 Mod（addonlist_pinned）排在最前，其余按
-    冲突数从多到少、名称排序。冲突报告与 addonlist.txt 共用，保证两者
-    顺序一致（置顶 Mod 在文件中同样靠前，被游戏优先读取）。"""
+
+
+class ConflictGroupDropHost(QWidget):
+    """Accept card drops and report a same-group reordering request."""
+
+    order_requested = pyqtSignal(str, str)  # (dragged_mod_id, target_mod_id)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAcceptDrops(True)
+
+    def dragEnterEvent(self, event) -> None:
+        if event.mimeData().hasFormat("application/x-l4dboss-conflict-mod"):
+            event.acceptProposedAction()
+
+    def dragMoveEvent(self, event) -> None:
+        if event.mimeData().hasFormat("application/x-l4dboss-conflict-mod"):
+            event.acceptProposedAction()
+
+    def dropEvent(self, event) -> None:
+        if not event.mimeData().hasFormat("application/x-l4dboss-conflict-mod"):
+            event.ignore()
+            return
+        source_id = bytes(event.mimeData().data("application/x-l4dboss-conflict-mod")).decode("utf-8")
+        target = self.childAt(event.pos())
+        while target is not None and not isinstance(target, ConflictCard):
+            target = target.parentWidget()
+        if isinstance(target, ConflictCard) and target.mod.id != source_id:
+            self.order_requested.emit(source_id, target.mod.id)
+            event.acceptProposedAction()
+            return
+        event.ignore()
+
+
+def conflict_group_sort_key(mod: Mod, priority_positions: dict[str, int] | None = None):
+    """冲突组内排序键：用户拖放优先级优先，其次才是传统置顶和冲突数。"""
+    priority = (priority_positions or {}).get(mod.id, 10**9)
     pinned = bool(getattr(mod, "addonlist_pinned", False))
-    return (0 if pinned else 1, -len(mod.conflict_with), mod.title.casefold())
+    return (priority, 0 if pinned else 1, -len(mod.conflict_with), mod.title.casefold())
 
 
 class ConflictDialog(QDialog):
     disable_requested = pyqtSignal(str)
 
     @staticmethod
-    def _conflict_groups(mods: dict[str, Mod]) -> list[list[Mod]]:
+    def _conflict_groups(mods: dict[str, Mod], priority_ids: list[str] | None = None) -> list[list[Mod]]:
         """Return connected components of the active conflict graph."""
         remaining = {mod_id for mod_id, mod in mods.items() if mod.active and mod.conflict_with}
+        priority_positions = {mod_id: index for index, mod_id in enumerate(priority_ids or [])}
         groups: list[list[Mod]] = []
         while remaining:
             pending = [remaining.pop()]
@@ -1216,7 +1315,7 @@ class ConflictDialog(QDialog):
                     if peer in remaining:
                         remaining.remove(peer)
                         pending.append(peer)
-            groups.append(sorted((mods[mod_id] for mod_id in component), key=conflict_group_sort_key))
+            groups.append(sorted((mods[mod_id] for mod_id in component), key=lambda mod: conflict_group_sort_key(mod, priority_positions)))
         return sorted(
             groups,
             key=lambda group: (
@@ -1399,7 +1498,7 @@ class AboutDialog(QDialog):
         github = QLabel("GitHub：https://github.com/chenduanyun091216/L4DBoss")
         github.setObjectName("aboutLink")
         github.setCursor(Qt.PointingHandCursor)
-        github.setStyleSheet("color: #2d65d6;")
+        github.setStyleSheet(f"color: {theme_color('link')};")
         github.mouseReleaseEvent = lambda _e: QDesktopServices.openUrl(QUrl("https://github.com/chenduanyun091216/L4DBoss"))
         content_layout.addWidget(github)
         content_layout.addStretch(1)
@@ -1767,6 +1866,12 @@ class MultiSelectComboBox(QComboBox):
         self._popup_open = False
         super().hidePopup()
 
+    def dismiss_popup(self) -> None:
+        """无条件关闭下拉层，用于切换到模态窗口前清理残留 popup。"""
+        self._keep_popup_open = False
+        self._popup_open = False
+        super().hidePopup()
+
     def togglePopup(self) -> None:
         if self._popup_open or self.view().isVisible():
             self.hidePopup()
@@ -1905,16 +2010,39 @@ def fetch_steam_for_mods(mods: dict[str, Mod], progress_callback=None, cancel_ev
         if progress_callback is not None:
             progress_callback(completed, total)
     return mods
+def _readable_text_color(background: str) -> str:
+    """Pick a text color that contrasts with the tag fill.
+
+    The themes' tag QSS forces white text, which is unreadable on the lighter
+    fills (conflict pink / dependency gold).  Compute WCAG relative luminance
+    and return a near-black for light fills so every theme stays readable
+    without hard-coding per-theme colors here.
+    """
+    color = QColor(background)
+    if not color.isValid():
+        return "#ffffff"
+
+    def _linear(channel: int) -> float:
+        value = channel / 255.0
+        return value / 12.92 if value <= 0.03928 else ((value + 0.055) / 1.055) ** 2.4
+
+    luminance = (
+        0.2126 * _linear(color.red()) + 0.7152 * _linear(color.green()) + 0.0722 * _linear(color.blue())
+    )
+    # Threshold 0.18: white text keeps >= 4.5:1 below it, black text above it.
+    return "#000000" if luminance > 0.18 else "#ffffff"
+
+
 def make_tag(text: str, color: str) -> QLabel:
     tag = QLabel(text)
     tag.setObjectName("tag")
-    tag.setStyleSheet(f"#tag {{ background: {color}; }}")
+    tag.setStyleSheet(f"#tag {{ background: {color}; color: {_readable_text_color(color)}; }}")
     return tag
 def make_tag_button(text: str, color: str, tooltip: str, handler) -> QPushButton:
     button = QPushButton(text)
     button.setObjectName("tagButton")
     button.setToolTip(tooltip)
-    button.setStyleSheet(f"#tagButton {{ background: {color}; }}")
+    button.setStyleSheet(f"#tagButton {{ background: {color}; color: {_readable_text_color(color)}; }}")
     button.clicked.connect(handler)
     return button
 def make_preview_pixmap(mod: Mod, max_width: int = ui(188), max_height: int = ui(104)) -> QPixmap:
@@ -2170,4 +2298,337 @@ class DependencyDialog(QDialog):
                 seen.add(dep)
                 ordered.append(dep)
         return ordered
+
+
+class FlowLayout(QLayout):
+    """横向自动换行的流式布局（精简自 PySide6 官方示例）。"""
+
+    def __init__(self, parent=None, margin=0, spacing=-1):
+        super().__init__(parent)
+        if parent is not None:
+            self.setContentsMargins(margin, margin, margin, margin)
+        self.setSpacing(spacing if spacing >= 0 else ui(6))
+        self._items: list[QLayoutItem] = []
+        # 保活子 widget 的 Python 引用，避免局部变量离开作用域后被 GC，
+        # 否则下次布局计算时 item.widget() 返回失效 wrapper，访问已回收内存会崩溃。
+        self._keepalive: list[QWidget] = []
+
+    def addItem(self, item: QLayoutItem) -> None:
+        self._items.append(item)
+        w = item.widget()
+        if w is not None:
+            self._keepalive.append(w)
+
+    def addWidget(self, w: QWidget) -> None:
+        # QWidgetItem 本身不会把控件收为布局父对象；此前漏掉这一句会让
+        # chip 保持无父窗口状态，在 Windows 上显示成左上角一闪而过的小窗。
+        # 先交给 QLayout 接管父子关系，才能在 _do_layout() 中定位到标签容器内。
+        self.addChildWidget(w)
+        self.addItem(QWidgetItem(w))
+
+    def count(self) -> int:
+        return len(self._items)
+
+    def itemAt(self, index: int) -> QLayoutItem | None:
+        return self._items[index] if 0 <= index < len(self._items) else None
+
+    def takeAt(self, index: int) -> QLayoutItem | None:
+        item = self._items.pop(index) if 0 <= index < len(self._items) else None
+        if item is not None:
+            w = item.widget()
+            if w is not None and w in self._keepalive:
+                self._keepalive.remove(w)
+        return item
+
+    def expandingDirections(self):
+        return Qt.Orientations(0)
+
+    def hasHeightForWidth(self) -> bool:
+        return True
+
+    def heightForWidth(self, width: int) -> int:
+        return self._do_layout(QRect(0, 0, width, 0), True)
+
+    def setGeometry(self, rect: QRect) -> None:
+        super().setGeometry(rect)
+        self._do_layout(rect, False)
+
+    def _do_layout(self, rect: QRect, test_only: bool) -> int:
+        x = rect.x() + self.contentsMargins().left()
+        y = rect.y() + self.contentsMargins().top()
+        line_height = 0
+        spacing = self.spacing()
+        for item in self._items:
+            wid = item.widget()
+            if wid is None or wid.isHidden():
+                continue
+            sz = wid.sizeHint()
+            next_x = x + sz.width() + spacing
+            if next_x - spacing > rect.right() and line_height > 0:
+                x = rect.x() + self.contentsMargins().left()
+                y += line_height + spacing
+                next_x = x + sz.width() + spacing
+                line_height = 0
+            if not test_only:
+                item.setGeometry(QRect(QPoint(x, y), sz))
+            x = next_x
+            line_height = max(line_height, sz.height())
+        return y - rect.y() + line_height + self.contentsMargins().bottom()
+
+    def sizeHint(self) -> QSize:
+        return self.minimumSize()
+
+    def minimumSize(self) -> QSize:
+        size = QSize()
+        for item in self._items:
+            w = item.widget()
+            if w is not None:
+                size = size.expandedTo(w.sizeHint())
+        m = self.contentsMargins()
+        size += QSize(m.left() + m.right(), m.top() + m.bottom())
+        return size
+
+
+class EditModInfoDialog(QDialog):
+    """编辑单个 Mod 的名称与标签。
+
+    标签以气泡（chip）展示，右上角 × 可删除；下方为树状分类（mod 分类），
+    勾选即在上方的气泡区新增对应气泡，取消勾选则移除气泡，二者双向联动。
+    新增标签归入“其他”分类。
+    """
+
+    mod_info_changed = pyqtSignal(str, str, list, list)  # (mod_id, custom_title, manual_tags, excluded_auto_tags)
+
+    def __init__(self, mod: Mod, available_tags: list[str], parent=None):
+        super().__init__(parent)
+        self.mod = mod
+        self._available = list(available_tags)
+        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.setModal(True)
+        self.resize(ui(540), ui(560))
+        self.setMinimumSize(ui(440), ui(460))
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        header = DragHeader(self)
+        header.setObjectName("dialogHeader")
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(ui(18), ui(10), ui(12), ui(10))
+        header_title = QLabel("编辑 Mod 信息")
+        header_title.setObjectName("dialogTitle")
+        header_layout.addWidget(header_title)
+        header_layout.addStretch(1)
+        close = QPushButton("×")
+        close.setObjectName("closeButton")
+        close.setToolTip("关闭")
+        close.clicked.connect(self.reject)
+        header_layout.addWidget(close)
+        root.addWidget(header)
+
+        content = QWidget()
+        content.setObjectName("aboutContent")
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(ui(18), ui(14), ui(18), ui(14))
+        content_layout.setSpacing(ui(10))
+
+        name_label = QLabel("卡片名称")
+        name_label.setObjectName("aboutDescription")
+        content_layout.addWidget(name_label)
+        self._name_edit = QLineEdit(mod.custom_title or mod.title or mod.file_name)
+        self._name_edit.setObjectName("promptInput")
+        self._name_edit.setPlaceholderText("留空使用原始名称")
+        content_layout.addWidget(self._name_edit)
+
+        tags_label = QLabel("当前标签（点击 × 移除）")
+        tags_label.setObjectName("aboutDescription")
+        content_layout.addWidget(tags_label)
+
+        # 气泡区：流式布局，自动换行。
+        self._chips_container = QWidget()
+        self._chips_container.setObjectName("editChips")
+        self._chips_layout = FlowLayout(self._chips_container, margin=0)
+        content_layout.addWidget(self._chips_container)
+
+        tree_label = QLabel("选择分类（勾选即加入上方标签）")
+        tree_label.setObjectName("aboutDescription")
+        content_layout.addWidget(tree_label)
+
+        self._tag_tree = QTreeWidget()
+        self._tag_tree.setHeaderHidden(True)
+        self._tag_tree.setUniformRowHeights(True)
+        self._tag_tree.itemChanged.connect(self._on_item_changed)
+        content_layout.addWidget(self._tag_tree, 1)
+
+        add_row = QHBoxLayout()
+        add_row.setSpacing(ui(8))
+        self._new_tag_edit = QLineEdit()
+        self._new_tag_edit.setObjectName("promptInput")
+        self._new_tag_edit.setPlaceholderText("输入新标签名称，回车添加（归入“其他”分类）")
+        self._new_tag_edit.returnPressed.connect(self._add_new_tag)
+        add_row.addWidget(self._new_tag_edit, 1)
+        add_btn = QPushButton("添加标签")
+        add_btn.setObjectName("promptSecondaryButton")
+        add_btn.setFixedWidth(ui(96))
+        add_btn.clicked.connect(self._add_new_tag)
+        add_row.addWidget(add_btn)
+        ok = QPushButton("确认")
+        ok.setObjectName("promptPrimaryButton")
+        ok.setFixedWidth(ui(96))
+        ok.clicked.connect(self.accept)
+        add_row.addWidget(ok)
+        content_layout.addLayout(add_row)
+
+        root.addWidget(content, 1)
+
+        self._rebuild_tags()
+        self._sync_chips()
+
+    def _rebuild_tags(self) -> None:
+        """树状呈现中英双语分类，并完整恢复当前生效标签。"""
+        effective_list = effective_tags(self.mod)
+        effective = set(effective_list)
+        represented: set[str] = set()
+        self._tag_tree.blockSignals(True)
+        self._tag_tree.clear()
+        for cid, label, depth in iter_category_tree(CATEGORIES):
+            if depth == 0:
+                group = QTreeWidgetItem(self._tag_tree, [label])
+                # 一级分类本身也是有效的自动标签（例如 survivors、infected），
+                # 不能只当作视觉分组，否则已有一级标签无法恢复到气泡区。
+                group.setFlags(group.flags() | Qt.ItemIsUserCheckable)
+                group.setData(0, Qt.UserRole, cid)
+                group.setCheckState(0, Qt.Checked if cid in effective else Qt.Unchecked)
+                group.setExpanded(True)
+                represented.add(cid)
+                continue
+            item = QTreeWidgetItem(group, [label])
+            item.setData(0, Qt.UserRole, cid)
+            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+            item.setCheckState(0, Qt.Checked if cid in effective else Qt.Unchecked)
+            represented.add(cid)
+        other_group = QTreeWidgetItem(self._tag_tree, ["其他 Other"])
+        other_group.setFlags(other_group.flags() & ~Qt.ItemIsSelectable)
+        other_group.setExpanded(True)
+        self._other_group = other_group
+        # 任何已有但不属于静态分类树的标签都必须先进入“其他”，否则
+        # 它们没有对应的 tree item，也就无法生成上方的当前标签气泡。
+        for tag in effective_list:
+            if tag in represented:
+                continue
+            item = QTreeWidgetItem(other_group, [tag])
+            item.setData(0, Qt.UserRole, tag)
+            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+            item.setCheckState(0, Qt.Checked)
+        self._tag_tree.blockSignals(False)
+
+    def _iter_checkable(self):
+        for i in range(self._tag_tree.topLevelItemCount()):
+            group = self._tag_tree.topLevelItem(i)
+            if group.flags() & Qt.ItemIsUserCheckable:
+                yield group
+            for j in range(group.childCount()):
+                yield group.child(j)
+
+    def _on_item_changed(self, _item, _column) -> None:
+        # 勾选状态变化 → 重建气泡区，实现联动。
+        self._sync_chips()
+
+    def _sync_chips(self) -> None:
+        """根据当前勾选状态更新气泡区可见性（chip 仅在首次创建，不删除重建）。"""
+        if not hasattr(self, "_chip_map"):
+            self._chip_map: dict = {}
+            self._empty_label = None
+            for it in self._iter_checkable():
+                chip = self._make_chip(it.text(0), it)
+                self._chips_layout.addWidget(chip)
+                self._chip_map[id(it)] = (it, chip)
+        any_visible = False
+        for it, chip in self._chip_map.values():
+            visible = it.checkState(0) == Qt.Checked
+            chip.setVisible(visible)
+            any_visible = any_visible or visible
+        if not any_visible:
+            if self._empty_label is None:
+                self._empty_label = QLabel("（暂无标签）")
+                self._empty_label.setObjectName("editChipEmpty")
+                self._chips_layout.addWidget(self._empty_label)
+            self._empty_label.setVisible(True)
+        elif self._empty_label is not None:
+            self._empty_label.setVisible(False)
+
+    def _make_chip(self, text: str, tree_item) -> QWidget:
+        cid = tree_item.data(0, Qt.UserRole) or text
+        chip = QWidget()
+        chip.setObjectName("editChip")
+        chip.setProperty("cid", cid)
+        layout = QHBoxLayout(chip)
+        layout.setContentsMargins(ui(6), ui(2), ui(3), ui(2))
+        layout.setSpacing(ui(2))
+        label = QLabel(text)
+        label.setObjectName("editChipText")
+        layout.addWidget(label)
+        x = QPushButton("×")
+        x.setObjectName("editChipClose")
+        x.setFixedSize(ui(16), ui(16))
+        x.clicked.connect(lambda _checked=False, item=tree_item: self._remove_chip(item))
+        layout.addWidget(x)
+        self._style_chip(chip, cid)
+        return chip
+
+    def _style_chip(self, chip: QWidget, cid: str) -> None:
+        bg = chip_color(cid, ACTIVE_THEME)
+        fg = chip_text_color(ACTIVE_THEME)
+        chip.setStyleSheet(
+            f"#editChip {{ background: {bg}; border: none; border-radius: 11px; min-height: 22px; max-height: 22px; }}"
+            f" #editChipText {{ color: {fg}; font-size: 11px; font-weight: 700; }}"
+        )
+
+    def _remove_chip(self, tree_item) -> None:
+        self._tag_tree.blockSignals(True)
+        tree_item.setCheckState(0, Qt.Unchecked)
+        self._tag_tree.blockSignals(False)
+        self._sync_chips()
+
+    def _add_new_tag(self) -> None:
+        text = self._new_tag_edit.text().strip()
+        if not text:
+            return
+        for it in self._iter_checkable():
+            if it.text(0) == text or it.data(0, Qt.UserRole) == text:
+                self._tag_tree.blockSignals(True)
+                it.setCheckState(0, Qt.Checked)
+                self._tag_tree.blockSignals(False)
+                self._new_tag_edit.clear()
+                self._sync_chips()
+                return
+        item = QTreeWidgetItem(self._other_group, [text])
+        item.setData(0, Qt.UserRole, text)
+        item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+        item.setCheckState(0, Qt.Checked)
+        if not hasattr(self, "_chip_map"):
+            self._chip_map = {}
+            self._empty_label = None
+        chip = self._make_chip(text, item)
+        self._chips_layout.addWidget(chip)
+        self._chip_map[id(item)] = (item, chip)
+        self._new_tag_edit.clear()
+        self._sync_chips()
+
+    def accept(self) -> None:
+        auto = set(self.mod.categories)
+        checked: set[str] = set()
+        for it in self._iter_checkable():
+            if it.checkState(0) == Qt.Checked:
+                checked.add(it.data(0, Qt.UserRole))
+        name = self._name_edit.text().strip()
+        original = self.mod.title or self.mod.file_name
+        if not name or name == original:
+            name = ""
+        manual_tags = sorted(checked - auto)
+        excluded_auto_tags = sorted(auto - checked)
+        self.mod_info_changed.emit(self.mod.id, name, manual_tags, excluded_auto_tags)
+        super().accept()
 

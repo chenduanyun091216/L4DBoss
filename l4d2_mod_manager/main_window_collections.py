@@ -25,7 +25,14 @@ from PyQt5.QtWidgets import (
     QStyledItemDelegate, QStyleOptionViewItem, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget, QWidgetAction,
 )
 
-from .categories import CATEGORIES, SIMPLE_CATEGORIES, infer_categories, simple_categories
+from .categories import (
+    ALL_STD_CATEGORY_IDS,
+    CATEGORIES,
+    SIMPLE_CATEGORIES,
+    effective_tags,
+    infer_categories,
+    simple_categories,
+)
 from .collection_sync import (
     delete_collection_folder,
     rename_collection_folder,
@@ -82,16 +89,43 @@ def filtered_mods(self) -> list[Mod]:
     if self._custom_title_only_filter:
         mods = [mod for mod in mods if mod.custom_title]
     if self.current_category != "all":
-        if self.category_mode == "simple":
-            mods = [
-                mod for mod in mods
-                if self.current_category in self._simple_categories_for(mod)
-            ]
+        if self.current_category.startswith("__tag__:"):
+            tag = self.current_category.removeprefix("__tag__:")
+            mods = [mod for mod in mods if tag in effective_tags(mod)]
+        elif self.category_mode == "simple":
+            if self.current_category == "others":
+                # “其他”不仅是自动分类兜底；带任何非标准手动标签的卡片
+                # 也应在此出现，方便用户发现和管理自定义标签。
+                mods = [
+                    mod for mod in mods
+                    if self.current_category in self._simple_categories_for(mod)
+                    or any(tag not in ALL_STD_CATEGORY_IDS for tag in effective_tags(mod))
+                ]
+            else:
+                mods = [
+                    mod for mod in mods
+                    if self.current_category in self._simple_categories_for(mod)
+                ]
         else:
-            mods = [mod for mod in mods if self.current_category in mod.categories]
+            cat = self.current_category
+            if cat in ("other", "miscellaneous"):
+                # “其他”分类同时收纳带手动新增（非标准）标签的 Mod。
+                mods = [
+                    mod for mod in mods
+                    if cat in effective_tags(mod)
+                    or any(t not in ALL_STD_CATEGORY_IDS for t in effective_tags(mod))
+                ]
+            else:
+                mods = [mod for mod in mods if cat in effective_tags(mod)]
     query = self.search_input.text().strip().lower() if hasattr(self, "search_input") else ""
     if query:
-        mods = [mod for mod in mods if query in " ".join([mod.custom_title, mod.title, mod.author, mod.file_name, mod.workshop_id or ""]).lower()]
+        mods = [
+            mod for mod in mods
+            if query in " ".join([
+                mod.custom_title, mod.title, mod.author, mod.file_name, mod.workshop_id or "",
+                *effective_tags(mod),
+            ]).lower()
+        ]
     for mod in mods:
         if mod.id not in self._mod_sort_cache:
             try:
@@ -462,20 +496,26 @@ def write_addonlist(self) -> bool:
         )
         entries.append((custom_filename, bool(custom_mod and custom_mod.active)))
 
-    # User-pinned cards always occupy the first entries. Newer pins come first;
-    # every non-pinned entry keeps its original relative order.
+    # User-pinned cards always occupy the first entries. Dragged conflict-card
+    # priority follows immediately after them, so a report's visual order is
+    # reflected in addonlist.txt as well.
     pinned_ids = [mod_id for mod_id in self.settings.get("addonlist_pinned_mod_ids", []) if mod_id in self.mods]
-    pinned_keys = [mod_entry_keys[mod_id] for mod_id in pinned_ids if mod_id in mod_entry_keys]
-    pinned_set = set(pinned_keys)
+    conflict_priority_ids = [
+        mod_id for mod_id in self.settings.get("conflict_priority_mod_ids", [])
+        if mod_id in self.mods and mod_id not in pinned_ids
+    ]
+    prioritized_ids = pinned_ids + conflict_priority_ids
+    prioritized_keys = [mod_entry_keys[mod_id] for mod_id in prioritized_ids if mod_id in mod_entry_keys]
+    prioritized_set = set(prioritized_keys)
     entry_by_key = {path.casefold(): (path, active) for path, active in entries}
     # Pinning changes only placement. Always recover the activation bit from
     # the corresponding Mod rather than from an older addonlist entry.
     ordered_entries = [
         (entry_by_key[mod_entry_keys[mod_id]][0], bool(self.mods[mod_id].active))
-        for mod_id in pinned_ids
+        for mod_id in prioritized_ids
         if mod_id in mod_entry_keys and mod_entry_keys[mod_id] in entry_by_key
     ]
-    ordered_entries.extend(entry for entry in entries if entry[0].casefold() not in pinned_set)
+    ordered_entries.extend(entry for entry in entries if entry[0].casefold() not in prioritized_set)
     entries = ordered_entries
 
     lines = ['"AddonList"\n', "{\n"]

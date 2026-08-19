@@ -378,6 +378,60 @@ def categories_from_steam_tags(tags: list[str]) -> set[str]:
     }
 
 
+def effective_tags(mod: "Mod") -> list[str]:
+    """生效标签 = 自动分类（剔除手动屏蔽）∪ 手动新增，保序去重。"""
+    seen: list[str] = []
+    excluded = set(getattr(mod, "excluded_auto_tags", []) or [])
+    for tag in mod.categories:
+        if tag not in excluded and tag not in seen:
+            seen.append(tag)
+    for tag in getattr(mod, "manual_tags", []) or []:
+        if tag not in seen:
+            seen.append(tag)
+    return seen
+
+
+def _zh(label: str) -> str:
+    """取分类 label 的中文段（首位空格前的部分）。"""
+    return label.split(" ", 1)[0] if label else ""
+
+
+def iter_category_tree(trees: list[dict] | None = None):
+    """生成静态分类树的所有节点 (id, display_label, depth)，跳过 'all' 根。"""
+    if trees is None:
+        trees = CATEGORIES
+    for node in trees:
+        if node.get("id") == "all":
+            continue
+        yield from _walk_tree(node, 0)
+
+
+def _walk_tree(node: dict, depth: int):
+    # 分类树本身使用“中文 + 英文”的展示格式；分类 ID 仍单独作为存储值。
+    yield (node["id"], node.get("label", ""), depth)
+    for child in node.get("children") or []:
+        if isinstance(child, dict):
+            yield from _walk_tree(child, depth + 1)
+        elif isinstance(child, tuple):
+            yield (child[0], child[1], depth + 1)
+
+
+def collect_all_category_ids() -> list[str]:
+    """汇总静态分类树中的全部可存储分类 ID（去重保序）。"""
+    ids: list[str] = []
+    for _id, _label, depth in iter_category_tree(CATEGORIES):
+        if _id not in ids:
+            ids.append(_id)
+    for _id, _label, depth in iter_category_tree(SIMPLE_CATEGORIES):
+        if _id not in ids:
+            ids.append(_id)
+    return ids
+
+
+ALL_STD_CATEGORY_IDS: set[str] = set(collect_all_category_ids())
+
+
+
 def categories_from_content_paths(paths_haystack: str) -> set[str]:
     """Use file roots only for general content type, never for weapon guesses."""
     rules = {

@@ -67,7 +67,7 @@ def show_card_context_menu(self, mod_id: str, global_pos) -> None:
     source_action = menu.addAction("查看源文件")
     source_action.setToolTip("打开该 Mod 所在文件夹")
     source_action.triggered.connect(lambda: self.open_mod_source(mod))
-    steam_action = menu.addAction("同步当前 Mod Steam 信息")
+    steam_action = menu.addAction("同步Steam信息")
     steam_action.setEnabled(bool(mod.workshop_id) and not self.steam_sync_in_progress)
     steam_action.triggered.connect(lambda: self.sync_single_mod_steam(mod_id))
     dep_action = menu.addAction("管理依赖…")
@@ -120,10 +120,12 @@ def create_collection_with_mod(self, mod_id: str) -> None:
     if card is not None:
         card.set_collection_context(self.collection_names_for(mod_id), self._selected_collection_names)
 
-@staticmethod
+def open_mod_source(self, mod: Mod) -> None:
+    """Reveal the Mod file in Explorer, or warn if it has been removed.
 
-@staticmethod
-def open_mod_source(mod: Mod) -> None:
+    An instance method (not a staticmethod) on purpose: the missing-file
+    branch needs the window as the message-box parent.
+    """
     file_path = Path(mod.file_path)
     if file_path.is_file():
         subprocess.Popen(["explorer.exe", "/select,", str(file_path)])
@@ -172,11 +174,14 @@ def delete_mod(self, mod_id: str) -> None:
 
 
 def _show_content_widget(self, title: str, subtitle: str, widget: QWidget) -> None:
-    self._list_snapshot = (
-        self.content_title.text(), self.content_subtitle.text(), self.current_category, self.current_page,
-    )
-    self._list_scroll_position = self.scroll.verticalScrollBar().value()
-    self._saved_card_widgets = list(self._card_widgets.items())
+    # 仅在离开正常列表时记录返回快照。冲突报告内打开详情、或重建冲突
+    # 报告时若再次覆盖它，返回按钮就会把“冲突报告”误当作列表标题。
+    if self._content_mode == "mods":
+        self._list_snapshot = (
+            self.content_title.text(), self.content_subtitle.text(), self.current_category, self.current_page,
+        )
+        self._list_scroll_position = self.scroll.verticalScrollBar().value()
+        self._saved_card_widgets = list(self._card_widgets.items())
     while self.cards_layout.count():
         item = self.cards_layout.takeAt(0)
         if item.widget() is not None:

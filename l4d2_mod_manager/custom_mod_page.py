@@ -197,11 +197,6 @@ def open_custom_mod_page(self) -> None:
             self.storage.save_settings(self.settings)
             self.write_addonlist()
             dialog.generated = True
-            for mod in self.mods.values():
-                if Path(mod.file_path).name.casefold() == self.settings.get("custom_mod_filename", CUSTOM_MOD_FILENAME).casefold():
-                    mod.custom_title = publish.mod_name if publish else ""
-                    self.storage.save_mods(self.mods)
-                    break
             detail = "\n".join(written) if values else ""
             QMessageBox.information(self, "自定义 Mod", ("已生成并安装自定义 Mod。\n\n写入文件：\n" + detail) if values else "已恢复默认，不再启用自定义 Mod。")
             dialog.accept()
@@ -216,4 +211,12 @@ def open_custom_mod_page(self) -> None:
     page.back_button.clicked.connect(dialog.reject)
     dialog.exec_()
     if dialog.generated:
+        # scan_mods rebuilds every Mod, so apply the custom title only AFTER the
+        # scan so it is not immediately discarded by on_scan_finished.
         self.scan_mods(True)
+        if publish is not None:
+            for mod in self.mods.values():
+                if Path(mod.file_path).name.casefold() == self.settings.get("custom_mod_filename", CUSTOM_MOD_FILENAME).casefold():
+                    mod.custom_title = publish.mod_name
+                    self.storage.save_mods(self.mods)
+                    break

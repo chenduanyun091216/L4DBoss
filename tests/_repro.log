@@ -1,0 +1,12 @@
+imports ok
+app ok
+mod imports ok
+constructed; sizeHint= 146 x 21 chips= 70 chip_map= 70
+toggle loop ok; chips= 70 chip_map= 70
+remove chip ok; chips= 70 chip_map= 70
+add tag ok; chips= 71 chip_map= 71 manual= ['自定义标签A']
+resize loop ok; sizeHint= 146 x 21
+about to show
+shown, closing
+exec done
+DONE

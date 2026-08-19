@@ -73,7 +73,7 @@ def _build_conflict_report(self, host: QWidget) -> None:
     # individual cards always remain visually identical in size.
     card_width = self.card_width(self.card_columns())
     columns = max(1, (available_width + spacing) // (card_width + spacing))
-    groups = ConflictDialog._conflict_groups(self.mods)
+    groups = ConflictDialog._conflict_groups(self.mods, self._conflict_priority_ids())
     conflict_names = {
         "rifle_ak47": "AK-47", "rifle_m16": "M16", "rifle_desert": "SCAR", "rifle_sg552": "SG552",
         "smg_uzi": "Uzi", "smg_silenced": "消音冲锋枪", "smg_mp5": "MP5",
@@ -140,7 +140,7 @@ def _build_conflict_group_section(
     detail.setToolTip("\n".join(sorted(shared_paths)) if shared_paths else reason)
     detail.setWordWrap(True)
     section_layout.addWidget(detail)
-    grid_host = QWidget()
+    grid_host = ConflictGroupDropHost()
     grid = QGridLayout(grid_host)
     grid.setContentsMargins(0, 0, 0, 0)
     grid.setHorizontalSpacing(ui(15))
@@ -152,6 +152,10 @@ def _build_conflict_group_section(
         card.context_requested.connect(self.show_card_context_menu)
         card.custom_title_changed.connect(self.on_card_custom_title_changed)
         grid.addWidget(card, card_index // columns, card_index % columns, Qt.AlignTop)
+    group_ids = [mod.id for mod in group]
+    grid_host.order_requested.connect(
+        lambda dragged, target, ids=group_ids: self._on_conflict_group_reordered(ids, dragged, target)
+    )
     section_layout.addWidget(grid_host)
     return section
 
@@ -191,9 +195,36 @@ def _rebuild_conflict_report_after_pin(self) -> None:
     红色图钉即时出现/消失，同时保留当前滚动位置。"""
     if self._content_mode != "detail" or not hasattr(self, "_conflict_report_context"):
         return
-    self._conflict_report_groups = ConflictDialog._conflict_groups(self.mods)
+    self._conflict_report_groups = ConflictDialog._conflict_groups(self.mods, self._conflict_priority_ids())
     for index in list(self._conflict_report_sections.keys()):
         self._rebuild_conflict_group_section(index)
+
+
+def _conflict_priority_ids(self) -> list[str]:
+    """Return the saved drag order, without stale Mod IDs."""
+    return [
+        mod_id for mod_id in self.settings.get("conflict_priority_mod_ids", [])
+        if mod_id in self.mods
+    ]
+
+
+def _on_conflict_group_reordered(self, group_ids: list[str], dragged_id: str, target_id: str) -> None:
+    """Persist one same-group drag operation and immediately redraw its report."""
+    if dragged_id not in group_ids or target_id not in group_ids or dragged_id == target_id:
+        return
+    ordered = list(group_ids)
+    ordered.remove(dragged_id)
+    ordered.insert(ordered.index(target_id), dragged_id)
+    # Keep the just-edited group at the front of the priority sequence; items
+    # from other groups retain their stored relative order.
+    priority = [mod_id for mod_id in self._conflict_priority_ids() if mod_id not in group_ids]
+    self.settings["conflict_priority_mod_ids"] = ordered + priority
+    self.storage.save_settings(self.settings)
+    if self.configured_addon_directories():
+        self.write_addonlist()
+    self._conflict_report_groups = ConflictDialog._conflict_groups(self.mods, self._conflict_priority_ids())
+    self._rebuild_conflict_report_after_pin()
+    self._show_conflict_toast("已更新冲突组优先级，并同步到 addonlist.txt")
 
 
 def _show_conflict_toast(self, message: str) -> None:

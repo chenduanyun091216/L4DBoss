@@ -25,7 +25,7 @@ from PyQt5.QtWidgets import (
     QStyledItemDelegate, QStyleOptionViewItem, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget, QWidgetAction,
 )
 
-from .categories import CATEGORIES, SIMPLE_CATEGORIES, infer_categories, simple_categories
+from .categories import CATEGORIES, SIMPLE_CATEGORIES, effective_tags, infer_categories, simple_categories
 from .dependencies import dependency_label, dependency_status, resolve_dependents
 from .collection_sync import delete_collection_folder, restore_collection_files, sync_collection_files
 from .models import Mod, ModCollection
@@ -62,8 +62,6 @@ def choose_directory(self) -> None:
     self.settings["mod_dir"] = str(addon_dirs[0].resolve())
     self.storage.save_settings(self.settings)
     self.scan_mods(True)
-
-@staticmethod
 
 @staticmethod
 def find_steam_game_executable() -> Path | None:
@@ -111,8 +109,6 @@ def find_steam_game_executable() -> Path | None:
         if candidate.exists():
             return candidate.resolve()
     return None
-
-@staticmethod
 
 @staticmethod
 def addon_directories(executable: Path) -> list[Path]:
@@ -185,9 +181,27 @@ def reset_mods(self) -> None:
 
 def on_scan_finished(self, mods: dict[str, Mod]) -> None:
     old_active = {key for key, mod in self.mods.items() if mod.active}
+    # Re-scan rebuilds every Mod object, so user-edited fields (custom_title,
+    # favorite, dependencies, etc.) stored on the previous objects would be lost.
+    # Merge them back by resolved file path before replacing self.mods.
+    old_by_path = {
+        str(Path(mod.file_path).resolve()): mod
+        for mod in self.mods.values()
+    }
     self.mods = mods
     self._simple_category_cache.clear()
     self._mod_sort_cache.clear()
+    for mod in self.mods.values():
+        old = old_by_path.get(str(Path(mod.file_path).resolve()))
+        if old is None:
+            continue
+        # 分类推断会重建 Mod 对象；以下字段属于用户选择，必须完整回填。
+        # 漏掉 manual_tags / excluded_auto_tags 会让编辑过的标签在扫描后消失。
+        for field in (
+            "custom_title", "favorite", "favorite_at", "dependencies", "conflict_pin",
+            "manual_tags", "excluded_auto_tags",
+        ):
+            setattr(mod, field, getattr(old, field))
     for key in old_active:
         if key in self.mods:
             self.mods[key].active = True
@@ -223,8 +237,6 @@ def launch_game(self) -> None:
             subprocess.Popen([str(executable)], cwd=str(executable.parent))
     except OSError as exc:
         QMessageBox.critical(self, "启动失败", f"游戏启动失败：{exc}")
-
-@staticmethod
 
 @staticmethod
 def steam_is_installed() -> bool:
@@ -308,12 +320,73 @@ def toggle_mod(self, mod_id: str) -> None:
         self._activate_mod_with_dependency_check(mod_id)
 
 
+def _campaign_series_key(mod: Mod) -> str | None:
+    """Return a stable key for numbered map/campaign parts, if applicable."""
+    if not {"campaigns", "maps"}.intersection(effective_tags(mod)):
+        return None
+    title = (mod.custom_title or mod.title or Path(mod.file_name).stem).strip()
+    # Only recognise explicit final part markers.  This intentionally avoids
+    # grouping arbitrary titles that merely contain a number in the middle.
+    key = re.sub(
+        r"(?ix)\s*(?:[\[\(]\s*)?(?:part|pt\.?|episode|ep\.?|chapter)\s*"
+        r"(?:\d+|[ivxlcdm]+)\s*(?:[\]\)])?\s*$",
+        "",
+        title,
+    )
+    key = re.sub(r"[\s_\-–—]+", " ", key).strip().casefold()
+    return key if key and key != title.casefold() else None
+
+
+def _campaign_series_peer_ids(self, mod_id: str) -> list[str]:
+    mod = self.mods.get(mod_id)
+    if mod is None:
+        return []
+    key = _campaign_series_key(mod)
+    if key is None:
+        return []
+    return [
+        peer.id for peer in self.mods.values()
+        if peer.id != mod_id and _campaign_series_key(peer) == key
+    ]
+
+
 def _activate_mod_with_dependency_check(self, mod_id: str) -> None:
-    """Turn a Mod on, offering to also enable its (transitive) dependencies."""
+    """Turn a Mod on, offering related campaign parts and dependencies."""
     mod = self.mods[mod_id]
-    inactive_ids, missing_ids = dependency_status(self.mods, mod_id)
+    targets = {mod_id}
+    series_inactive = [
+        peer_id for peer_id in self._campaign_series_peer_ids(mod_id)
+        if not self.mods[peer_id].active
+    ]
+    if series_inactive:
+        titles = "\n".join(
+            f"• {self.mods[peer_id].title or self.mods[peer_id].file_name}"
+            for peer_id in sorted(series_inactive, key=lambda item: (self.mods[item].title or self.mods[item].file_name).casefold())
+        )
+        box = QMessageBox(self)
+        box.setWindowTitle("启用同系列地图")
+        box.setIcon(QMessageBox.Question)
+        box.setText(
+            f"「{mod.title or mod.file_name}」属于一个分段地图/战役系列：\n\n{titles}\n\n"
+            "是否一并启用同系列的其他部分？"
+        )
+        all_button = box.addButton("全部启用", QMessageBox.YesRole)
+        current_button = box.addButton("仅启用当前", QMessageBox.NoRole)
+        cancel_button = box.addButton("取消", QMessageBox.RejectRole)
+        box.exec_()
+        if box.clickedButton() is cancel_button:
+            return
+        if box.clickedButton() is all_button:
+            targets.update(series_inactive)
+
+    inactive_ids: set[str] = set()
+    missing_ids: set[str] = set()
+    for target_id in targets:
+        inactive, missing = dependency_status(self.mods, target_id)
+        inactive_ids.update(inactive)
+        missing_ids.update(missing)
     if not inactive_ids and not missing_ids:
-        self._set_mods_active({mod_id}, True)
+        self._set_mods_active(targets, True)
         return
     lines = []
     for dep_id in sorted(inactive_ids, key=lambda dep: (self.mods[dep].title or self.mods[dep].file_name).casefold()):
@@ -324,7 +397,7 @@ def _activate_mod_with_dependency_check(self, mod_id: str) -> None:
     box.setWindowTitle("启用依赖 Mod")
     box.setIcon(QMessageBox.Question)
     box.setText(
-        f"「{mod.title or mod.file_name}」依赖以下 Mod：\n\n"
+        f"待启用 Mod 依赖以下项目：\n\n"
         + "\n".join(lines)
         + "\n\n是否一并启用已安装的依赖 Mod？"
     )
@@ -335,7 +408,6 @@ def _activate_mod_with_dependency_check(self, mod_id: str) -> None:
     clicked = box.clickedButton()
     if clicked is cancel_button:
         return
-    targets = {mod_id}
     if clicked is yes_button:
         targets.update(inactive_ids)
     self._set_mods_active(targets, True)

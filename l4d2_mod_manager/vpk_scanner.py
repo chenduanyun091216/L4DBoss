@@ -32,7 +32,19 @@ def scan_mod_directory(directory: Path | list[Path], existing: dict[str, Mod] | 
                 continue
         result[mod_id] = parse_vpk_file(file_path, mod_id)
     valid_paths = {str(path.resolve()) for path in file_paths}
-    return {mod_id: mod for mod_id, mod in result.items() if str(Path(mod.file_path).resolve()) in valid_paths}
+    # A mod whose fingerprint (path:size:mtime) is part of its id can produce a
+    # second id after the file is updated (Steam workshop sync, manual replace).
+    # Both ids share the same file_path, so keep only the most recent one to
+    # avoid the same file appearing as two separate cards.
+    best_by_path: dict[str, Mod] = {}
+    for mod_id, mod in result.items():
+        if str(Path(mod.file_path).resolve()) not in valid_paths:
+            continue
+        path_key = str(Path(mod.file_path).resolve())
+        prev = best_by_path.get(path_key)
+        if prev is None or mod.file_mtime_ns > prev.file_mtime_ns:
+            best_by_path[path_key] = mod
+    return {mod.id: mod for mod in best_by_path.values()}
 
 
 def _scan_files(directories: list[Path]) -> list[Path]:

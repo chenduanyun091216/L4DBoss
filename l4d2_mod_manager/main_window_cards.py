@@ -25,7 +25,7 @@ from PyQt5.QtWidgets import (
     QStyledItemDelegate, QStyleOptionViewItem, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget, QWidgetAction,
 )
 
-from .categories import CATEGORIES, SIMPLE_CATEGORIES, infer_categories, simple_categories
+from .categories import ALL_STD_CATEGORY_IDS, CATEGORIES, SIMPLE_CATEGORIES, effective_tags, infer_categories, simple_categories
 from .collection_sync import delete_collection_folder, restore_collection_files, sync_collection_files
 from .models import Mod, ModCollection
 from .steam_client import SteamClient
@@ -101,6 +101,19 @@ def refresh_tree(self) -> None:
         categories = SIMPLE_CATEGORIES if self.category_mode == "simple" else CATEGORIES
         for category in categories:
             self.category_tree.addTopLevelItem(self._make_tree_item(category, 0))
+        if self.category_mode == "simple":
+            # 手动自定义标签归入左侧“其他 Others”，每个标签可直接作为筛选项。
+            custom_tags = sorted({
+                tag
+                for mod in self.mods.values()
+                for tag in effective_tags(mod)
+                if tag not in ALL_STD_CATEGORY_IDS
+            }, key=str.casefold)
+            if custom_tags:
+                other = self._find_tree_item("others")
+                if other is not None:
+                    for tag in custom_tags:
+                        other.addChild(self._make_tree_item((f"__tag__:{tag}", tag), 1))
         self.category_tree.expandAll()
         target = self.category_tree.topLevelItem(0)
         stack = [target] if target is not None else []
@@ -113,6 +126,19 @@ def refresh_tree(self) -> None:
         self.category_tree.setCurrentItem(target)
     finally:
         self._tree_rebuilding = False
+
+
+def _find_tree_item(self, category_id: str):
+    """Find a category row by its stored ID in the rebuilt sidebar tree."""
+    stack = [self.category_tree.topLevelItem(i) for i in range(self.category_tree.topLevelItemCount())]
+    while stack:
+        item = stack.pop()
+        if item is None:
+            continue
+        if item.data(0, Qt.UserRole) == category_id:
+            return item
+        stack.extend(item.child(index) for index in range(item.childCount()))
+    return None
 
 
 def _tree_item_color(self, depth: int, is_leaf: bool) -> QColor:
@@ -277,6 +303,7 @@ def _populate_cards_batch(
             card.context_requested.connect(self.show_card_context_menu)
             card.favorite_toggled.connect(self.toggle_favorite)
             card.custom_title_changed.connect(self.on_card_custom_title_changed)
+            card.mod_info_changed.connect(self.on_card_mod_info_changed)
             self._card_cache[mod.id] = card
         else:
             card.mod = mod
@@ -313,6 +340,24 @@ def on_card_custom_title_changed(self, mod_id: str, custom_title: str) -> None:
         return
     mod.custom_title = custom_title
     self.storage.save_mods(self.mods)
+
+def on_card_mod_info_changed(
+    self, mod_id: str, custom_title: str, manual_tags: list[str], excluded_auto_tags: list[str]
+) -> None:
+    """Persist a card's custom name and tag edits, then reclassify it."""
+    mod = self.mods.get(mod_id)
+    if mod is None:
+        return
+    mod.custom_title = custom_title
+    mod.manual_tags = list(manual_tags)
+    mod.excluded_auto_tags = list(excluded_auto_tags)
+    self.storage.save_mods(self.mods)
+    # 清掉该 Mod 的分类缓存，使其在新标签下重新归类与统计。
+    self._simple_category_cache.pop(mod_id, None)
+    # 左侧“其他”下的自定义标签列表也要马上刷新。
+    self.refresh_tree()
+    # 重排当前页：刷新卡片类型标签并把 Mod 移入/移出对应分类。
+    self.refresh_cards()
 
 
 def _update_pagination(self, total: int, total_pages: int) -> None:
@@ -716,11 +761,9 @@ def _update_mod_filter_title(self) -> None:
 def _simple_categories_for(self, mod: Mod) -> set[str]:
     cached = self._simple_category_cache.get(mod.id)
     if cached is None:
-        cached = simple_categories(mod.categories, mod.title, mod.files, mod.file_name)
+        cached = simple_categories(effective_tags(mod), mod.title, mod.files, mod.file_name)
         self._simple_category_cache[mod.id] = cached
     return cached
-
-@staticmethod
 
 @staticmethod
 def _time_sort_key(mod: Mod) -> tuple[int, str]:

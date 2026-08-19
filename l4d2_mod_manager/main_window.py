@@ -299,6 +299,7 @@ from .main_window_cards import (
     _update_conflicts_for_toggle,
     _refresh_card_states,
     refresh_tree,
+    _find_tree_item,
     _make_tree_item,
     _tree_item_color,
     _refresh_tree_foregrounds,
@@ -306,6 +307,7 @@ from .main_window_cards import (
     refresh_cards,
     _populate_cards_batch,
     on_card_custom_title_changed,
+    on_card_mod_info_changed,
     _update_pagination,
     change_page,
     on_search_changed,
@@ -340,6 +342,7 @@ MainWindow._refresh_conflicts_from_index = _refresh_conflicts_from_index
 MainWindow._update_conflicts_for_toggle = _update_conflicts_for_toggle
 MainWindow._refresh_card_states = _refresh_card_states
 MainWindow.refresh_tree = refresh_tree
+MainWindow._find_tree_item = _find_tree_item
 MainWindow._make_tree_item = _make_tree_item
 MainWindow._tree_item_color = _tree_item_color
 MainWindow._refresh_tree_foregrounds = _refresh_tree_foregrounds
@@ -347,6 +350,7 @@ MainWindow.on_category_mode_switch_changed = on_category_mode_switch_changed
 MainWindow.refresh_cards = refresh_cards
 MainWindow._populate_cards_batch = _populate_cards_batch
 MainWindow.on_card_custom_title_changed = on_card_custom_title_changed
+MainWindow.on_card_mod_info_changed = on_card_mod_info_changed
 MainWindow._update_pagination = _update_pagination
 MainWindow.change_page = change_page
 MainWindow.on_search_changed = on_search_changed
@@ -392,6 +396,8 @@ from .main_window_mods import (
     toggle_favorite,
     open_mods_directory,
     manage_dependencies,
+    _campaign_series_key,
+    _campaign_series_peer_ids,
     _activate_mod_with_dependency_check,
     _deactivate_mod_with_dependency_check,
     _set_mods_active,
@@ -413,6 +419,8 @@ MainWindow.toggle_mod = toggle_mod
 MainWindow.toggle_favorite = toggle_favorite
 MainWindow.open_mods_directory = open_mods_directory
 MainWindow.manage_dependencies = manage_dependencies
+MainWindow._campaign_series_key = staticmethod(_campaign_series_key)
+MainWindow._campaign_series_peer_ids = _campaign_series_peer_ids
 MainWindow._activate_mod_with_dependency_check = _activate_mod_with_dependency_check
 MainWindow._deactivate_mod_with_dependency_check = _deactivate_mod_with_dependency_check
 MainWindow._set_mods_active = _set_mods_active
@@ -510,6 +518,8 @@ from .main_window_conflicts import (
     _show_completed_conflict_report,
     _rebuild_conflict_group_section,
     _rebuild_conflict_report_after_pin,
+    _conflict_priority_ids,
+    _on_conflict_group_reordered,
     _show_conflict_toast,
     disable_conflict_mod,
 )
@@ -521,6 +531,8 @@ MainWindow._build_conflict_group_section = _build_conflict_group_section
 MainWindow._show_completed_conflict_report = _show_completed_conflict_report
 MainWindow._rebuild_conflict_group_section = _rebuild_conflict_group_section
 MainWindow._rebuild_conflict_report_after_pin = _rebuild_conflict_report_after_pin
+MainWindow._conflict_priority_ids = _conflict_priority_ids
+MainWindow._on_conflict_group_reordered = _on_conflict_group_reordered
 MainWindow._show_conflict_toast = _show_conflict_toast
 MainWindow.disable_conflict_mod = disable_conflict_mod
 

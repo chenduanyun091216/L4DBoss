@@ -125,6 +125,42 @@ def theme_color(key: str, fallback_theme: str = "dark") -> str:
     return palette.get(key, THEME_PALETTE[fallback_theme][key])
 
 
+# 编辑标签气泡的候选配色，按主题提供高区分度的一组颜色。
+CHIP_COLORS: dict[str, list[str]] = {
+    "dark": [
+        "#2d65d6", "#19a974", "#e0902b", "#c0392b",
+        "#8e44ad", "#16a3a3", "#d43a8a", "#5d6d7e",
+    ],
+    "light": [
+        "#2d65d6", "#1e8e5a", "#d98324", "#c0392b",
+        "#7d3cae", "#138496", "#c2185b", "#566573",
+    ],
+    "titanium": [
+        "#3d78ee", "#1e8e5a", "#d98324", "#d64545",
+        "#9b59b6", "#1796a3", "#d81b60", "#6b7785",
+    ],
+}
+
+# 各主题下气泡文字颜色：深色背景下用浅字，浅色背景下用深字。
+CHIP_TEXT_COLORS: dict[str, str] = {
+    "dark": "#ffffff",
+    "light": "#ffffff",
+    "titanium": "#ffffff",
+}
+
+
+def chip_color(cid: str, theme: str | None = None) -> str:
+    """为某个分类 id 选定一个稳定且主题自适应的气泡配色。"""
+    theme = theme or ACTIVE_THEME
+    palette = CHIP_COLORS.get(theme, CHIP_COLORS["dark"])
+    return palette[abs(hash(cid)) % len(palette)]
+
+
+def chip_text_color(theme: str | None = None) -> str:
+    theme = theme or ACTIVE_THEME
+    return CHIP_TEXT_COLORS.get(theme, CHIP_TEXT_COLORS["dark"])
+
+
 # Opacity of the full-window background image per theme. Higher values make
 # the wallpaper stand out more; keep it low enough for text/panels to stay
 # readable. Consumed by BackgroundSurface.paintEvent.
@@ -356,6 +392,12 @@ THEMES = {
     #mainConflictGroupReason { color: #d4e1f3; background: #202c3d; border: 1px solid #3e506a; border-radius: 5px; padding: 5px 7px; font-size: 10px; }
     #dialogSubtitle { color: #8596af; font-size: 11px; }
     #aboutContent { background: #121924; border-bottom-left-radius: 14px; border-bottom-right-radius: 14px; }
+    #editChips { background: transparent; border: none; padding: 0; min-height: 24px; }
+    #editChip { border: none; border-radius: 11px; min-height: 22px; max-height: 22px; }
+    #editChipText { color: #ffffff; font-size: 11px; font-weight: 700; }
+    #editChipClose { background: transparent; border: none; border-radius: 8px; color: #d6e4ff; font-size: 13px; font-weight: 800; padding: 0; }
+    #editChipClose:hover { background: rgba(255, 255, 255, 50); color: #ff8a8a; }
+    #editChipEmpty { color: #6c7c93; font-size: 11px; }
     #aboutBrand { color: #f1f5fb; font-size: 25px; font-weight: 800; letter-spacing: 2px; }
     #aboutVersion { color: #7698d9; font-size: 12px; font-weight: 700; }
     #aboutDesigner { color: #aebbd0; font-size: 12px; font-weight: 500; padding: 2px 0; background: transparent; border: 0; }
@@ -618,6 +660,12 @@ THEMES = {
     #mainConflictGroupReason { color: #4a5a73; background: #fbeef0; border: 1px solid #e5b4bb; border-radius: 5px; padding: 5px 7px; font-size: 10px; }
     #dialogSubtitle { color: #64748e; font-size: 11px; }
     #aboutContent { background: #ffffff; border-bottom-left-radius: 14px; border-bottom-right-radius: 14px; }
+    #editChips { background: transparent; border: none; padding: 0; min-height: 24px; }
+    #editChip { border: none; border-radius: 11px; min-height: 22px; max-height: 22px; }
+    #editChipText { color: #ffffff; font-size: 11px; font-weight: 700; }
+    #editChipClose { background: transparent; border: none; border-radius: 8px; color: #e6eefc; font-size: 13px; font-weight: 800; padding: 0; }
+    #editChipClose:hover { background: rgba(255, 255, 255, 120); color: #ff6b6b; }
+    #editChipEmpty { color: #8596af; font-size: 11px; }
     #aboutBrand { color: #1c2a43; font-size: 25px; font-weight: 800; letter-spacing: 2px; }
     #aboutVersion { color: #2b5fd0; font-size: 12px; font-weight: 700; }
     #aboutDesigner { color: #5d6d87; font-size: 12px; font-weight: 500; padding: 2px 0; background: transparent; border: 0; }
@@ -877,10 +925,16 @@ THEMES = {
     #steamDetailsLink:hover { background: #3470bc; color: white; }
     #mainConflictGroup { background: rgba(250, 240, 242, 115); border: 1px solid #d99aa2; border-radius: 10px; }
     #mainConflictGroupTitle { color: #b0404c; font-size: 12px; font-weight: 800; }
-    #mainConflictGroupPinHint { color: #e6b94f; background: rgba(212, 160, 23, 30); border: 1px solid #c98a00; border-radius: 4px; padding: 1px 7px; font-size: 10px; font-weight: 700; }
+    #mainConflictGroupPinHint { color: #8a5d00; background: rgba(212, 160, 23, 30); border: 1px solid #c98a00; border-radius: 4px; padding: 1px 7px; font-size: 10px; font-weight: 700; }
     #mainConflictGroupReason { color: #4a3a42; background: rgba(251, 238, 240, 125); border: 1px solid #e0aab1; border-radius: 5px; padding: 5px 7px; font-size: 10px; }
     #dialogSubtitle { color: #b9c6d6; font-size: 11px; }
     #aboutContent { background: #363e48; border-bottom-left-radius: 14px; border-bottom-right-radius: 14px; }
+    #editChips { background: transparent; border: none; padding: 0; min-height: 24px; }
+    #editChip { border: none; border-radius: 11px; min-height: 22px; max-height: 22px; }
+    #editChipText { color: #ffffff; font-size: 11px; font-weight: 700; }
+    #editChipClose { background: transparent; border: none; border-radius: 8px; color: #d6e4ff; font-size: 13px; font-weight: 800; padding: 0; }
+    #editChipClose:hover { background: rgba(255, 255, 255, 50); color: #ff8a8a; }
+    #editChipEmpty { color: #9aa6b3; font-size: 11px; }
     #aboutBrand { color: #f2f6fc; font-size: 25px; font-weight: 800; letter-spacing: 2px; }
     #aboutVersion { color: #9fc3ff; font-size: 12px; font-weight: 700; }
     #aboutDesigner { color: #b9c6d6; font-size: 12px; font-weight: 500; padding: 2px 0; background: transparent; border: 0; }

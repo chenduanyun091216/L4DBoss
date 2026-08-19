@@ -31,6 +31,10 @@ class Mod:
     file_size: int = 0
     file_mtime_ns: int = 0
     custom_title: str = ""
+    # 用户手动新增的标签：不在自动分类树中的归“其他”，并重分类。
+    manual_tags: list[str] = field(default_factory=list)
+    # 用户从自动推断中剔除的标签（仅影响该 Mod）。
+    excluded_auto_tags: list[str] = field(default_factory=list)
 
     @property
     def display_subscriptions(self) -> str:

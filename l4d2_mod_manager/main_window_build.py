@@ -387,8 +387,6 @@ def _header_button(
     return button
 
 @staticmethod
-
-@staticmethod
 def _window_control_button(symbol: str, tooltip: str, handler) -> QPushButton:
     button = QPushButton(symbol)
     button.setObjectName("windowControlButton")
@@ -537,8 +535,6 @@ def _set_theme(self, theme_key: str) -> None:
     self.refresh_tree()
 
 @staticmethod
-
-@staticmethod
 def _launch_icon() -> QIcon:
     """An original survivor-inspired mark for the launch action."""
     size = ui(48)
@@ -682,8 +678,6 @@ def _build_footer_legacy(self) -> QWidget:
     layout.addWidget(self.save_button)
     layout.insertWidget(layout.indexOf(self.save_button), self.toggle_all_button)
     return footer
-
-@staticmethod
 
 @staticmethod
 def _make_mod_count_button(object_name: str, handler) -> QPushButton:
