@@ -4,7 +4,7 @@
 
 ## 📥 立即下载
 
-[![Download L4DBoss.exe](https://img.shields.io/badge/Download-L4DBoss.exe-blue?style=for-the-badge&logo=github)](https://github.com/chenduanyun091216/L4DBoss/releases/download/L4DModManager/L4DBoss.exe)
+[![Download L4DBoss.exe]([https://img.shields.io/badge/Download-L4DBoss.exe-blue?style=for-the-badge&logo=github](https://github.com/chenduanyun091216/L4DBoss/releases/download/L4DBOSS/L4DBoss.exe))](https://github.com/chenduanyun091216/L4DBoss/releases/download/L4DModManager/L4DBoss.exe)
 
 > 💡 **使用提示**：点击上方按钮即可下载最新版 `L4DBoss.exe`。若浏览器拦截，请选择“保留文件”。
 
