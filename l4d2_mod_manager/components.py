@@ -2680,12 +2680,17 @@ class EditModInfoDialog(QDialog):
         layout.setSpacing(ui(2))
         label = QLabel(text)
         label.setObjectName("editChipText")
+        label.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
         layout.addWidget(label)
         x = QPushButton("×")
         x.setObjectName("editChipClose")
         x.setFixedSize(ui(16), ui(16))
+        x.setContentsMargins(0, 0, 0, 0)
         x.clicked.connect(lambda _checked=False, item=tree_item: self._remove_chip(item))
         layout.addWidget(x)
+        # Custom chips have a border while standard chips do not; fixing the
+        # outer height keeps both kinds vertically centered on the same row.
+        chip.setFixedHeight(ui(26))
         self._style_chip(chip, cid)
         return chip
 
@@ -2697,7 +2702,7 @@ class EditModInfoDialog(QDialog):
         border = theme.theme_color("tree_favorite") if custom else "transparent"
         border_width = 2 if custom else 0
         chip.setStyleSheet(
-            f"#editChip {{ background: {bg}; border: {border_width}px solid {border}; border-radius: 11px; min-height: 22px; max-height: 22px; }}"
+            f"#editChip {{ background: {bg}; border: {border_width}px solid {border}; border-radius: 11px; min-height: 26px; max-height: 26px; }}"
             f" #editChipText {{ color: {fg}; font-size: 11px; font-weight: 700; }}"
         )
 

@@ -548,6 +548,36 @@ def _launch_icon() -> QIcon:
     return QIcon(pixmap)
 
 
+def _footer_icon(kind: str) -> QIcon:
+    """Draw compact action icons that remain legible in every theme."""
+    size = ui(32)
+    pixmap = QPixmap(size, size)
+    pixmap.fill(Qt.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.Antialiasing)
+    pen = painter.pen()
+    pen.setColor(QColor(theme_color("menu_text")))
+    pen.setWidth(ui(2))
+    pen.setJoinStyle(Qt.RoundJoin)
+    painter.setPen(pen)
+    painter.setBrush(Qt.NoBrush)
+    if kind == "toggle":
+        painter.drawEllipse(ui(6), ui(6), size - ui(12), size - ui(12))
+        painter.drawLine(size // 2, ui(3), size // 2, size // 2)
+        painter.drawArc(ui(11), ui(11), size - ui(22), size - ui(22), 220 * 16, 280 * 16)
+    elif kind == "save":
+        painter.drawRoundedRect(ui(6), ui(5), size - ui(12), size - ui(10), ui(3), ui(3))
+        painter.drawLine(ui(11), ui(6), ui(11), ui(14))
+        painter.drawLine(size - ui(11), ui(6), size - ui(11), ui(14))
+        painter.drawRect(ui(11), size - ui(11), size - ui(22), ui(5))
+    elif kind == "save_as":
+        painter.drawRoundedRect(ui(9), ui(5), size - ui(14), size - ui(12), ui(3), ui(3))
+        painter.drawRoundedRect(ui(5), ui(9), size - ui(14), size - ui(12), ui(3), ui(3))
+        painter.drawLine(ui(12), size - ui(10), size - ui(9), size - ui(10))
+    painter.end()
+    return QIcon(pixmap)
+
+
 def _build_content_bar(self) -> QWidget:
     bar = QWidget()
     layout = QHBoxLayout(bar)
@@ -672,7 +702,7 @@ def _build_footer_legacy(self) -> QWidget:
     layout.addWidget(self.active_label)
     layout.addWidget(self.conflict_button)
     layout.addStretch(1)
-    self.save_button = QPushButton(self.style().standardIcon(QStyle.SP_DialogSaveButton), "保存")
+    self.save_button = QPushButton(_footer_icon("save"), "保存")
     self.save_button.setObjectName("primaryButton")
     self.save_button.clicked.connect(self.save_collection)
     layout.addWidget(self.save_button)
@@ -730,7 +760,7 @@ def _build_footer(self) -> QWidget:
     self.save_button.setObjectName("primaryButton")
     self.save_button.clicked.connect(self.save_collection)
     action_layout.addWidget(self.save_button)
-    self.save_as_button = QPushButton(self.style().standardIcon(QStyle.SP_FileDialogDetailedView), "另存为")
+    self.save_as_button = QPushButton(_footer_icon("save_as"), "另存为")
     self.save_as_button.setObjectName("secondaryButton")
     self.save_as_button.clicked.connect(self.save_collection_as_new)
     action_layout.addWidget(self.save_as_button)
@@ -745,6 +775,7 @@ def _build_footer(self) -> QWidget:
     )
     for button in self._footer_action_buttons:
         button.setIconSize(QSize(ui(14), ui(14)))
+    self.toggle_all_button.setIcon(_footer_icon("toggle"))
     # 底部四个操作按钮的悬停提示以置顶覆盖层显示在“全部启动”按钮左侧。
     for button in self._footer_action_buttons:
         button.installEventFilter(self)
@@ -772,6 +803,15 @@ def _apply_style(self) -> None:
     # 窗口级只重抛光本窗口子树。无父级的 QToolTip 由启动时设置的
     # TOOLTIP_QSS 覆盖。
     self.setStyleSheet(THEMES.get(self._theme, THEMES["dark"]))
+    # Repaint programmatic footer icons with the active theme's contrast
+    # color; unlike stylesheet text, QIcon pixmaps do not update by
+    # themselves when the theme changes.
+    if hasattr(self, "toggle_all_button"):
+        self.toggle_all_button.setIcon(_footer_icon("toggle"))
+    if hasattr(self, "save_button"):
+        self.save_button.setIcon(_footer_icon("save"))
+    if hasattr(self, "save_as_button"):
+        self.save_as_button.setIcon(_footer_icon("save_as"))
     # Re-evaluate button minimum sizes after the stylesheet has applied;
     # padding and font metrics are part of the real required width.
     QTimer.singleShot(0, lambda: self._sync_content_right_edges(force=True))

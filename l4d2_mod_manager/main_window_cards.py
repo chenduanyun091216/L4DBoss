@@ -608,8 +608,12 @@ def _sync_content_right_edges(self, force: bool = False) -> None:
     # remains the final item in this right-aligned layout, its right edge
     # shares the right edge of the last card as well.
     if hasattr(self, "search_input") and hasattr(self, "collection_combo"):
-        control_width = getattr(self, "_fixed_combo_width", ModCard.BASE_WIDTH)
-        grid_gap = getattr(self, "_fixed_filter_gap", ui(15))
+        # Use the width the grid actually renders at.  The preferred card
+        # size is only used to choose the column count; using it here makes
+        # the default filter controls narrower than the visible cards.
+        columns = self.card_columns()
+        control_width = self.card_width(columns)
+        grid_gap = self.cards_layout.horizontalSpacing()
         self._filter_controls.setSpacing(grid_gap)
         combo_width = control_width
         self.collection_combo.setFixedWidth(combo_width)
@@ -621,7 +625,7 @@ def _sync_content_right_edges(self, force: bool = False) -> None:
             content_left = self.content_bar.mapToGlobal(QPoint(0, 0)).x()
             bar_gap = self.content_bar.layout().spacing()
             filter_gap = self._filter_controls.spacing()
-            search_width = getattr(self, "_fixed_search_width", 2 * control_width + grid_gap)
+            search_width = 2 * control_width + grid_gap
             search_left = grid_right - combo_width - filter_gap - search_width
             title_width = search_left - content_left - bar_gap
             self.content_title_host.setFixedWidth(max(ui(1), title_width))

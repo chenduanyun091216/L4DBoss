@@ -234,17 +234,14 @@ class MainWindow(QMainWindow):
         if hasattr(self, "toggle_all_button"):
             all_active = bool(self.mods) and all(mod.active for mod in self.mods.values())
             self.toggle_all_button.setText("全部禁用" if all_active else "全部启动")
-            self.toggle_all_button.setIcon(
-                self.style().standardIcon(
-                    QStyle.SP_DialogCancelButton if all_active else QStyle.SP_DialogApplyButton
-                )
-            )
+            self.toggle_all_button.setIcon(_footer_icon("toggle"))
 
 
 from .main_window_build import (
     _build_ui,
     _build_header,
     _header_button,
+    _footer_icon,
     _window_control_button,
     toggle_maximized,
     restore_default_window,

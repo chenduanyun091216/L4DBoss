@@ -414,7 +414,7 @@ THEMES = {
     #dialogSubtitle { color: #8596af; font-size: 11px; }
     #aboutContent { background: #121924; border-bottom-left-radius: 14px; border-bottom-right-radius: 14px; }
     #editChips { background: transparent; border: none; padding: 0; min-height: 24px; }
-    #editChip { border: none; border-radius: 11px; min-height: 22px; max-height: 22px; }
+    #editChip { border: none; border-radius: 11px; min-height: 26px; max-height: 26px; }
     #editChipText { color: #ffffff; font-size: 11px; font-weight: 700; }
     #editChipClose { background: transparent; border: none; border-radius: 8px; color: #d6e4ff; font-size: 13px; font-weight: 800; padding: 0; }
     #editChipClose:hover { background: rgba(255, 255, 255, 50); color: #ff8a8a; }
@@ -683,7 +683,7 @@ THEMES = {
     #dialogSubtitle { color: #64748e; font-size: 11px; }
     #aboutContent { background: #ffffff; border-bottom-left-radius: 14px; border-bottom-right-radius: 14px; }
     #editChips { background: transparent; border: none; padding: 0; min-height: 24px; }
-    #editChip { border: none; border-radius: 11px; min-height: 22px; max-height: 22px; }
+    #editChip { border: none; border-radius: 11px; min-height: 26px; max-height: 26px; }
     #editChipText { color: #ffffff; font-size: 11px; font-weight: 700; }
     #editChipClose { background: transparent; border: none; border-radius: 8px; color: #e6eefc; font-size: 13px; font-weight: 800; padding: 0; }
     #editChipClose:hover { background: rgba(255, 255, 255, 120); color: #ff6b6b; }
@@ -956,7 +956,7 @@ THEMES = {
     #dialogSubtitle { color: #b9c6d6; font-size: 11px; }
     #aboutContent { background: #363e48; border-bottom-left-radius: 14px; border-bottom-right-radius: 14px; }
     #editChips { background: transparent; border: none; padding: 0; min-height: 24px; }
-    #editChip { border: none; border-radius: 11px; min-height: 22px; max-height: 22px; }
+    #editChip { border: none; border-radius: 11px; min-height: 26px; max-height: 26px; }
     #editChipText { color: #ffffff; font-size: 11px; font-weight: 700; }
     #editChipClose { background: transparent; border: none; border-radius: 8px; color: #d6e4ff; font-size: 13px; font-weight: 800; padding: 0; }
     #editChipClose:hover { background: rgba(255, 255, 255, 50); color: #ff8a8a; }
